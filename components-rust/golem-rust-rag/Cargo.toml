@@ -1,0 +1,23 @@
+[package]
+name = "golem_rust_rag"
+version = "0.0.1"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib"]
+path = "src/lib.rs"
+
+[dependencies]
+# To use common shared agent definitions, place them in common_lib and uncomment the line below
+common-lib = { path = "../../common-rust/common-lib" }
+
+log = { workspace = true }
+golem-rust = { workspace = true }
+golem-rdbms = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+wstd = { workspace = true }
+
+# RAG and Vector Search dependencies
+uuid = { workspace = true }
+anyhow = { workspace = true }
