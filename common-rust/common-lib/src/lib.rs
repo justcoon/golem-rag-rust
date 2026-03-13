@@ -1,3 +1,3 @@
-pub fn example_common_function() -> &'static str {
-    "hello common"
-}
+pub mod s3_client;
+
+pub use s3_client::*;

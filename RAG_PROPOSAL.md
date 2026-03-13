@@ -184,15 +184,185 @@ impl Default for SearchFilters {
 }
 ```
 
+## S3 Document Source Integration
+
+### S3 Client Implementation
+
+Based on the Golem AI project pattern, I've added an S3 client to `common-lib` for document ingestion with configurable endpoints:
+
+```rust
+use common_lib::s3_client::{S3Client, S3Config, S3DocumentSource};
+
+// S3 Configuration from environment - supports custom endpoints
+let s3_config = S3Config {
+    access_key_id: env::var("AWS_ACCESS_KEY_ID")?,
+    secret_access_key: env::var("AWS_SECRET_ACCESS_KEY")?,
+    region: env::var("AWS_REGION")?,
+    bucket: env::var("AWS_S3_BUCKET")?,
+    endpoint_url: env::var("S3_ENDPOINT_URL").ok(), // Optional custom endpoint
+};
+
+let s3_client = S3Client::new(
+    s3_config.access_key_id,
+    s3_config.secret_access_key,
+    s3_config.region,
+    s3_config.endpoint_url, // Custom endpoint or None for AWS default
+)?;
+
+// List documents from S3
+let documents = s3_client.list_objects(&s3_config.bucket, Some("documents/"))?;
+
+// Download document content
+let content = s3_client.get_object(&s3_config.bucket, &document_key)?;
+```
+
+### Enhanced DocumentAgent with S3 Support
+
+```rust
+#[agent_definition]
+pub trait DocumentAgent {
+    fn new() -> Self;
+    
+    // Document lifecycle
+    fn add_document(&mut self, doc: Document) -> Result<Uuid>;
+    fn index_s3_documents(&mut self, s3_prefix: Option<&str>) -> Result<Vec<IndexingResult>>;
+    
+    // S3-specific methods
+    fn list_s3_documents(&self, prefix: Option<&str>) -> Result<Vec<S3DocumentSource>>;
+    fn download_s3_document(&self, bucket: &str, key: &str) -> Result<Vec<u8>>;
+}
+
+struct DocumentAgentImpl {
+    db_url: String,
+    s3_client: S3Client,
+    s3_bucket: String,
+}
+
+#[agent_implementation]
+impl DocumentAgent for DocumentAgentImpl {
+    fn new() -> Self {
+        let db_url = env::var("DB_URL")
+            .expect("DB_URL environment variable must be set");
+        
+        let s3_client = S3Client::new(
+            env::var("AWS_ACCESS_KEY_ID").expect("AWS_ACCESS_KEY_ID required"),
+            env::var("AWS_SECRET_ACCESS_KEY").expect("AWS_SECRET_ACCESS_KEY required"),
+            env::var("AWS_REGION").expect("AWS_REGION required"),
+            env::var("S3_ENDPOINT_URL").ok(), // Optional custom endpoint
+        ).expect("Failed to create S3 client");
+        
+        let s3_bucket = env::var("AWS_S3_BUCKET")
+            .expect("AWS_S3_BUCKET required");
+        
+        Self { db_url, s3_client, s3_bucket }
+    }
+    
+    fn index_s3_documents(&mut self, s3_prefix: Option<&str>) -> Result<Vec<IndexingResult>> {
+        let s3_response = self.s3_client.list_objects(&self.s3_bucket, s3_prefix)?;
+        let mut results = Vec::new();
+        
+        for s3_doc in s3_response.objects {
+            // Skip non-document files
+            if !s3_doc.key.ends_with(".txt") && !s3_doc.key.ends_with(".md") && !s3_doc.key.ends_with(".pdf") {
+                continue;
+            }
+            
+            // Download document content
+            let content = self.s3_client.get_object(&self.s3_bucket, &s3_doc.key)?;
+            let content_str = String::from_utf8(content)?;
+            
+            // Create document
+            let document = Document {
+                id: Uuid::new_v4(),
+                title: s3_doc.key.split('/').last().unwrap_or(&s3_doc.key).to_string(),
+                content: content_str,
+                metadata: DocumentMetadata {
+                    source: format!("s3://{}/{}", self.s3_bucket, s3_doc.key),
+                    content_type: self.infer_content_type(&s3_doc.key),
+                    created_at: Timestamp::now(),
+                    updated_at: Timestamp::now(),
+                    tags: vec!["s3".to_string(), "auto-indexed".to_string()],
+                    metadata: serde_json::json!({
+                        "s3_bucket": self.s3_bucket,
+                        "s3_key": s3_doc.key,
+                        "size_bytes": s3_doc.size_bytes,
+                        "last_modified": s3_doc.last_modified,
+                    }),
+                },
+            };
+            
+            // Index the document
+            let result = self.index_document(document, ChunkConfig {
+                chunk_size: 1000,
+                chunk_overlap: 200,
+            })?;
+            
+            results.push(result);
+        }
+        
+        Ok(results)
+    }
+    
+    fn list_s3_documents(&self, prefix: Option<&str>) -> Result<Vec<S3DocumentSource>> {
+        let response = self.s3_client.list_objects(&self.s3_bucket, prefix)?;
+        Ok(response.objects)
+    }
+    
+    fn download_s3_document(&self, bucket: &str, key: &str) -> Result<Vec<u8>> {
+        self.s3_client.get_object(bucket, key)
+    }
+}
+```
+
+### S3 Environment Variables
+
+```bash
+# AWS S3 Configuration
+AWS_ACCESS_KEY_ID=your_access_key_here
+AWS_SECRET_ACCESS_KEY=your_secret_key_here
+AWS_REGION=us-east-1
+AWS_S3_BUCKET=your-document-bucket
+
+# Optional: Custom S3-compatible endpoint
+# S3_ENDPOINT_URL=https://your-minio-server.com
+# S3_ENDPOINT_URL=https://your-cloudflare-r2-endpoint.com
+# S3_ENDPOINT_URL=https://your-digitalocean-spaces.com
+
+# Database Configuration
+DB_URL=postgresql://postgres:password@localhost:5432/golem_rag
+
+# Other Configuration
+EMBEDDING_MODEL=mock-embedding-v1
+DOCUMENT_AGENT_ID=document-agent
+SEARCH_AGENT_ID=search-agent
+```
+
+### Benefits of Configurable S3 Endpoints
+
+1. **Multi-Cloud Support**: Works with AWS S3, MinIO, DigitalOcean Spaces, Cloudflare R2, etc.
+2. **Private Cloud**: Use on-premises S3-compatible storage
+3. **Edge Storage**: Deploy to edge locations with S3-compatible APIs
+4. **Cost Optimization**: Choose the most cost-effective S3-compatible provider
+5. **Migration Friendly**: Easy to switch between S3 providers without code changes
+
+### Supported S3-Compatible Providers
+
+- **AWS S3**: Default (no endpoint URL needed)
+- **MinIO**: `S3_ENDPOINT_URL=https://your-minio-server.com`
+- **DigitalOcean Spaces**: `S3_ENDPOINT_URL=https://your-region.digitaloceanspaces.com`
+- **Cloudflare R2**: `S3_ENDPOINT_URL=https://your-account.r2.cloudflarestorage.com`
+- **Wasabi**: `S3_ENDPOINT_URL=https://s3.wasabisys.com`
+- **Backblaze B2**: `S3_ENDPOINT_URL=https://s3.us-west-002.backblazeb2.com`
+
 ## Database Access Strategy
 
 ### Golem RDBMS Integration (Primary Approach)
 
-The RAG system will use Golem's built-in RDBMS support through the `golem-rdbms` crate, with direct database connection using a URL:
+The RAG system will use Golem's built-in RDBMS support through Golem-generated database code from WIT definitions, with direct database connection using a URL:
 
 ```rust
 use golem_rust::bindings::golem::rdbms::postgres::DbConnection;
-use golem_rdbms::types::{Uuid, Timestamp, Vector};
+use golem_rust::bindings::golem::rdbms::types::{Uuid, Timestamp, Vector};
 use std::env;
 
 #[agent_definition]
@@ -307,7 +477,7 @@ USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100);
 ### Vector Operations with Golem RDBMS
 
 ```rust
-use golem_rdbms::types::Vector;
+use golem_rust::bindings::golem::rdbms::types::Vector;
 
 impl RagAgentImpl {
     fn store_embedding(&mut self, chunk_id: Uuid, embedding: Vec<f32>) -> Result<Uuid> {

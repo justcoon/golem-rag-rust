@@ -2,3 +2,21 @@
 name = "common-lib"
 version = "0.1.0"
 edition = "2021"
+
+[lib]
+crate-type = ["cdylib"]
+path = "src/lib.rs"
+
+[dependencies]
+golem-rust = { workspace = true }
+golem-wasi-http = { workspace = true }
+log = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+wstd = { workspace = true }
+
+# S3 Client dependencies
+chrono = { version = "0.4", features = ["serde"] }
+hmac = "0.12"
+sha2 = "0.10"
+hex = "0.4"
