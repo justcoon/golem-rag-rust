@@ -2704,7 +2704,11 @@ impl RagAgentImpl {
             ORDER BY similarity DESC
             LIMIT $3
             "#,
-            &[&query_vector, &threshold, &limit]
+            vec![
+                PostgresDbValue::Array(query_vector.into_iter().map(|v| PostgresLazyDbValue::new(PostgresDbValue::Float4(v))).collect()),
+                PostgresDbValue::Float8(threshold),
+                PostgresDbValue::Int8(limit as i64),
+            ]
         )?;
         
         // Process result.rowss into SearchResult objects
@@ -2725,29 +2729,6 @@ DB_URL=postgresql://postgres:password@localhost:5432/golem_rag
 EMBEDDING_MODEL=mock-embedding-v1
 DOCUMENT_AGENT_ID=document-agent
 SEARCH_AGENT_ID=search-agent
-```
-
-### Migration Management
-
-```rust
-impl RagAgentImpl {
-    fn initialize_database(&mut self) -> Result<()> {
-        let mut connection = DbConnection::open(&self.db_url)?;
-        
-        // Run migrations
-        connection.execute("CREATE EXTENSION IF NOT EXISTS vector", &[])?;
-        
-        // Create tables if they don't exist
-        connection.execute(include_str!("migrations/001_create_documents.sql"), &[])?;
-        connection.execute(include_str!("migrations/002_create_chunks.sql"), &[])?;
-        connection.execute(include_str!("migrations/003_create_embeddings.sql"), &[])?;
-        
-        // Create indexes
-        connection.execute(include_str!("migrations/004_create_indexes.sql"), &[])?;
-        
-        Ok(())
-    }
-}
 ```
 
 ## Current Agent Implementation
