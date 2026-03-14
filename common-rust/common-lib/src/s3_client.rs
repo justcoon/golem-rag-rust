@@ -3,6 +3,7 @@ use golem_wasi_http::{Client, Method};
 use hmac::{Hmac, Mac};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use golem_rust::Schema;
 
 // S3 Document Source Types
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -14,13 +15,14 @@ pub struct S3Config {
     pub endpoint_url: Option<String>, // Custom S3-compatible endpoint
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Schema, Serialize, Deserialize)]
 pub struct S3DocumentSource {
     pub bucket: String,
     pub key: String,
     pub size_bytes: u64,
     pub last_modified: String,
     pub content_type: String,
+    pub namespace: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -332,6 +334,7 @@ impl S3Client {
                             size_bytes: 0,
                             last_modified: String::new(),
                             content_type: String::new(),
+                            namespace: String::new(), // Will be set by caller
                         });
                     }
                 }

@@ -119,6 +119,7 @@ dependencies = [
 name = "common-lib"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "chrono",
  "golem-rust",
  "golem-wasi-http",
@@ -128,6 +129,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
+ "uuid",
  "wstd",
 ]
 
@@ -453,12 +455,16 @@ name = "golem_rust_rag"
 version = "0.0.1"
 dependencies = [
  "anyhow",
+ "chrono",
  "common-lib",
  "golem-rust",
  "golem-wasi-http",
+ "hex",
+ "hmac",
  "log",
  "serde",
  "serde_json",
+ "sha2",
  "uuid",
  "wstd",
 ]

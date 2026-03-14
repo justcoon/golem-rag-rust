@@ -21,3 +21,9 @@ wstd = { workspace = true }
 # RAG and Vector Search dependencies
 uuid = { workspace = true }
 anyhow = { workspace = true }
+
+# S3 Client dependencies  
+chrono = { workspace = true }
+hmac = { workspace = true }
+sha2 = { workspace = true }
+hex = { workspace = true }
