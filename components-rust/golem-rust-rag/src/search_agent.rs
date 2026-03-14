@@ -116,10 +116,25 @@ impl SearchAgent for SearchAgentImpl {
 
 impl SearchAgentImpl {
     fn generate_query_embedding(&self, query: &str) -> AgentResult<Vec<f32>> {
-        // For now, use mock embedding generation
-        // In a real implementation, this would use the embedding client
         log::debug!("Generating embedding for query: {}", query);
-        Ok(EmbeddingClient::mock_embedding(query, 768))
+        
+        // Get embedding configuration from environment variables
+        let api_base = std::env::var("EMBEDDING_API_BASE")
+            .unwrap_or_else(|_| "http://localhost:8000".to_string());
+        let api_key = std::env::var("EMBEDDING_API_KEY")
+            .unwrap_or_else(|_| "mock-key".to_string());
+        let model = std::env::var("EMBEDDING_MODEL")
+            .unwrap_or_else(|_| "mock-embedding-v1".to_string());
+        
+        // Create embedding client
+        let embedding_client = EmbeddingClient::new(api_base, api_key, model)
+            .map_err(|e| format!("Failed to create embedding client: {:?}", e))?;
+        
+        // For now, use mock embedding since generate_embedding is async
+        // In a real async implementation, we would await the result
+        let embedding = EmbeddingClient::mock_embedding(query, 768);
+        
+        Ok(embedding)
     }
     
     fn vector_similarity_search(&self, db_helper: &DatabaseHelper, query_embedding: &[f32], limit: usize, threshold: f32) -> AgentResult<Vec<SearchResult>> {
@@ -282,23 +297,41 @@ impl SearchAgentImpl {
     
     fn get_document_embedding(&self, db_helper: &DatabaseHelper, document_id: &str) -> AgentResult<Vec<f32>> {
         let query = r#"
-            SELECT e.vector
-            FROM embeddings e
-            JOIN document_chunks dc ON e.chunk_id = dc.id
+            SELECT dc.content
+            FROM document_chunks dc
+            JOIN embeddings e ON dc.id = e.chunk_id
             WHERE dc.document_id = $1 AND e.embedding_status = 'completed'
             LIMIT 1
         "#;
         
         let result = db_helper.connection.query(query, vec![PostgresDbValue::Text(document_id.to_string())])
-            .map_err(|e| format!("Failed to get document embedding: {:?}", e))?;
+            .map_err(|e| format!("Failed to get document content: {:?}", e))?;
         
         if result.rows.is_empty() {
-            return Err("Document embedding not found".to_string());
+            return Err("Document content not found".to_string());
         }
+
+        // Get the document content
+        let content = try_match!(&result.rows[0].values[0], PostgresDbValue::Text(content) => content.clone())
+            .map_err(|_| "Invalid content type".to_string())?;
         
-        // For now, return a mock embedding
-        // In a real implementation, this would extract the actual vector from the database
-        Ok(EmbeddingClient::mock_embedding(document_id, 768))
+        // Get embedding configuration from environment variables
+        let api_base = std::env::var("EMBEDDING_API_BASE")
+            .unwrap_or_else(|_| "http://localhost:8000".to_string());
+        let api_key = std::env::var("EMBEDDING_API_KEY")
+            .unwrap_or_else(|_| "mock-key".to_string());
+        let model = std::env::var("EMBEDDING_MODEL")
+            .unwrap_or_else(|_| "mock-embedding-v1".to_string());
+        
+        // Create embedding client
+        let embedding_client = EmbeddingClient::new(api_base, api_key, model)
+            .map_err(|e| format!("Failed to create embedding client: {:?}", e))?;
+        
+        // For now, use mock embedding since generate_embedding is async
+        // In a real async implementation, we would await the result
+        let embedding = EmbeddingClient::mock_embedding(&content, 768);
+        
+        Ok(embedding)
     }
     
     fn build_filter_conditions(&self, filters: &SearchFilters) -> String {
