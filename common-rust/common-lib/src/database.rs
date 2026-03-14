@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 use golem_rust::Schema;
 use crate::models::*;
 use anyhow::Result;
+use try_match::try_match;
 
 // Re-export Golem RDBMS types for convenience
 pub use golem_rust::bindings::golem::rdbms::postgres::{
@@ -18,7 +19,7 @@ pub struct DatabaseConfig {
 }
 
 pub struct DatabaseHelper {
-    connection: PostgresDbConnection,
+    pub connection: PostgresDbConnection,
 }
 
 impl DatabaseHelper {
@@ -47,10 +48,10 @@ impl DatabaseHelper {
                 PostgresDbValue::Text(document_id.clone()),
                 PostgresDbValue::Text(document.title.clone()),
                 PostgresDbValue::Text(document.content.clone()),
-                PostgresDbValue::Text(serde_json::to_string(&document.metadata)?),
+                PostgresDbValue::Jsonb(serde_json::to_string(&document.metadata)?),
                 PostgresDbValue::Text(document.metadata.created_at.clone()),
                 PostgresDbValue::Text(document.metadata.updated_at.clone()),
-                PostgresDbValue::Text(serde_json::to_string(&document.metadata.tags)?),
+                PostgresDbValue::Jsonb(serde_json::to_string(&document.metadata.tags)?),
                 PostgresDbValue::Text(document.metadata.source.clone()),
                 PostgresDbValue::Text(document.metadata.namespace.clone()),
                 PostgresDbValue::Int8(document.metadata.size_bytes as i64),
@@ -69,25 +70,10 @@ impl DatabaseHelper {
         }
 
         let row = &result.rows[0];
-        let id = match &row.values[0] {
-            PostgresDbValue::Text(id) => id.clone(),
-            _ => return Err(anyhow::anyhow!("Invalid document ID type")),
-        };
-        
-        let title = match &row.values[1] {
-            PostgresDbValue::Text(title) => title.clone(),
-            _ => return Err(anyhow::anyhow!("Invalid title type")),
-        };
-        
-        let content = match &row.values[2] {
-            PostgresDbValue::Text(content) => content.clone(),
-            _ => return Err(anyhow::anyhow!("Invalid content type")),
-        };
-        
-        let metadata_str = match &row.values[3] {
-            PostgresDbValue::Text(metadata) => metadata.clone(),
-            _ => return Err(anyhow::anyhow!("Invalid metadata type")),
-        };
+        let id = try_match!(&row.values[0], PostgresDbValue::Text(id) => id.clone()).map_err(|_| anyhow::anyhow!("Invalid document ID type"))?;
+        let title = try_match!(&row.values[1], PostgresDbValue::Text(title) => title.clone()).map_err(|_| anyhow::anyhow!("Invalid title type"))?;
+        let content = try_match!(&row.values[2], PostgresDbValue::Text(content) => content.clone()).map_err(|_| anyhow::anyhow!("Invalid content type"))?;
+        let metadata_str = try_match!(&row.values[3], PostgresDbValue::Jsonb(metadata) => metadata.clone()).map_err(|_| anyhow::anyhow!("Invalid metadata type"))?;
         
         let metadata: DocumentMetadata = serde_json::from_str(&metadata_str)?;
         
@@ -127,14 +113,11 @@ impl DatabaseHelper {
         }
 
         let row = &result.rows[0];
-        let status_str = match &row.values[0] {
-            PostgresDbValue::Text(status) => status.clone(),
-            _ => return Err(anyhow::anyhow!("Invalid status type")),
-        };
+        let status_str = try_match!(&row.values[0], PostgresDbValue::Text(status) => status.clone()).map_err(|_| anyhow::anyhow!("Invalid status type"))?;
 
         if status_str.starts_with("completed:") {
             let chunk_count = status_str.split(':').nth(1)
-                .and_then(|s| s.parse::<usize>().ok())
+                .and_then(|s: &str| s.parse::<usize>().ok())
                 .unwrap_or(0);
             Ok(EmbeddingStatus::Completed { chunk_count })
         } else if status_str.starts_with("failed:") {
