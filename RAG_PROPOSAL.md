@@ -26,7 +26,7 @@ This proposal outlines a comprehensive RAG (Retrieval-Augmented Generation) pipe
 
 4. **Document Agent** (`DocumentAgent`) - **Ephemeral**
    - Retrieves document content and metadata from database
-   - Provides document access for search results and applications
+   - Provides document access for search result.rowss and applications
    - Optimized for read-heavy document retrieval operations
 
 5. **Search Agent** (`SearchAgent`) - **Ephemeral**
@@ -273,6 +273,86 @@ createdb golem_rag
 psql golem_rag -f migrations/001_initial_schema.sql
 ```
 
+## Golem RDBMS Integration
+
+### Import Aliases
+
+The Golem RDBMS API uses type aliases for PostgreSQL-specific types:
+
+```rust
+use golem_rust::bindings::golem::rdbms::postgres::{
+    DbColumnType as PostgresDbColumnType, 
+    DbConnection as PostgresDbConnection,
+    DbRow as PostgresDbRow, 
+    DbValue as PostgresDbValue, 
+    LazyDbValue as PostgresLazyDbValue,
+};
+```
+
+### PostgresDbValue Types
+
+The Golem RDBMS API requires using `PostgresDbValue` enum types for query parameters and returns `PostgresDbValue` types in responses:
+
+```rust
+// Query parameters must be PostgresDbValue enum
+let params = vec![
+    PostgresDbValue::Text(document_id),
+    PostgresDbValue::Text(title),
+];
+let count = connection.execute(&statement.statement, params)?;
+
+// Response contains PostgresDbResult with rows and values
+let result = connection.query(&statement.statement, params)?;
+for row in result.rows {
+    for value in &row.values {
+        match value {
+            PostgresDbValue::Text(text) => println!("Text: {}", text),
+            PostgresDbValue::Int8(num) => println!("Number: {}", num),
+            PostgresDbValue::Array(arr) => {
+                for element in &arr {
+                    let element_value = element.get();
+                    // Process array elements
+                }
+            }
+            _ => println!("Other value: {:?}", value),
+        }
+    }
+}
+```
+
+### Common PostgresDbValue Types
+
+```rust
+// Basic types
+PostgresDbValue::Text(value)      // TEXT, VARCHAR
+PostgresDbValue::Int8(value)         // BIGINT, INTEGER (i64)
+PostgresDbValue::Int4(value)         // INTEGER (i32)
+PostgresDbValue::Int2(value)         // SMALLINT (i16)
+PostgresDbValue::Float4(value)       // REAL (f32)
+PostgresDbValue::Float8(value)       // DOUBLE PRECISION (f64)
+PostgresDbValue::Bool(value)        // BOOLEAN
+PostgresDbValue::Null               // NULL values
+
+// Complex types
+PostgresDbValue::Array(vec)         // Arrays (including pgvector)
+PostgresDbValue::Bytes(value)       // BYTEA
+PostgresDbValue::Json(value)        // JSON, JSONB
+```
+
+### Vector Type Support
+
+For pgvector embeddings, use `PostgresDbValue::Array` with `PostgresLazyDbValue`:
+
+```rust
+// Embedding vector as PostgresDbValue
+let embedding_vec: Vec<f32> = vec![0.1, 0.2, 0.3, ...];
+let vector_params: Vec<PostgresLazyDbValue> = embedding_vec
+    .into_iter()
+    .map(|v| PostgresLazyDbValue::new(PostgresDbValue::Float4(v)))
+    .collect();
+PostgresDbValue::Array(vector_params)
+```
+
 ## Data Models
 
 ### Core Types (in common-lib)
@@ -335,7 +415,7 @@ pub struct Embedding {
     pub created_at: String, // ISO timestamp
 }
 
-// Search results
+// Search result.rowss
 #[derive(Clone, Debug, Schema, Serialize, Deserialize)]
 pub struct SearchResult {
     pub chunk: DocumentChunk,
@@ -631,9 +711,12 @@ impl S3DocumentLoaderAgentImpl {
         let mut connection = DbConnection::open(&self.db_url)?;
         
         let query = "SELECT COUNT(*) FROM documents WHERE metadata->'source_metadata'->>'s3_key' = $1";
-        let result = connection.query(query, &[s3_key])?;
+        let result = connection.query(query, vec![PostgresDbValue::Text(s3_key.to_string())])?;
         
-        Ok(result.len() > 0 && result[0].get::<_, i64>(0) > 0)
+        Ok(!result.rows.is_empty() && match &result.rows[0].values[0] {
+            PostgresDbValue::Int8(count) => *count > 0,
+            _ => false,
+        })
     }
     
     fn store_document(&self, document: Document) -> Result<String> {
@@ -644,17 +727,17 @@ impl S3DocumentLoaderAgentImpl {
         connection.execute(
             "INSERT INTO documents (id, title, content, metadata, created_at, updated_at, tags, source, namespace, size_bytes) 
              VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)",
-            &[
-                &document_id.to_string(),
-                &document.title,
-                &document.content,
-                &serde_json::to_string(&document.metadata)?,
-                &document.metadata.created_at,
-                &document.metadata.updated_at,
-                &serde_json::to_string(&document.metadata.tags)?,
-                &document.metadata.source,
-                &document.metadata.namespace,
-                &document.metadata.size_bytes,
+            vec![
+                PostgresDbValue::Text(document_id.to_string()),
+                PostgresDbValue::Text(document.title),
+                PostgresDbValue::Text(document.content),
+                PostgresDbValue::Text(serde_json::to_string(&document.metadata)?),
+                PostgresDbValue::Text(document.metadata.created_at),
+                PostgresDbValue::Text(document.metadata.updated_at),
+                PostgresDbValue::Text(serde_json::to_string(&document.metadata.tags)?),
+                PostgresDbValue::Text(document.metadata.source),
+                PostgresDbValue::Text(document.metadata.namespace),
+                PostgresDbValue::Int8(document.metadata.size_bytes as i64),
             ]
         )?;
         
@@ -797,21 +880,35 @@ impl EmbeddingGeneratorAgent for EmbeddingGeneratorAgentImpl {
             .map_err(|e| anyhow::anyhow!("Failed to connect to database: {:?}", e))?;
         
         let query = "SELECT embedding_status, chunk_count FROM document_embeddings WHERE document_id = $1";
-        let result = connection.query(query, &[&document_id])?;
+        let result = connection.query(query, vec![PostgresDbValue::Text(document_id.to_string())])?;
         
-        if result.is_empty() {
+        if result.rows.is_empty() {
             Ok(EmbeddingStatus::NotProcessed)
         } else {
-            let status_str = result[0].get::<_, String>(0);
+            let first_row = &result.rows[0];
+            let status_value = &first_row.values[0];
+            let status_str = match status_value {
+                PostgresDbValue::Text(s) => s.clone(),
+                _ => return Err(anyhow::anyhow!("Invalid status value")),
+            };
             match status_str.as_str() {
                 "in_progress" => Ok(EmbeddingStatus::InProgress),
                 "completed" => {
-                    let chunk_count = result[0].get::<_, i64>(1) as usize;
+                    let chunk_count_value = &first_row.values[1];
+                    let chunk_count = match chunk_count_value {
+                        PostgresDbValue::Int8(n) => *n as usize,
+                        _ => return Err(anyhow::anyhow!("Invalid chunk count value")),
+                    };
                     Ok(EmbeddingStatus::Completed { chunk_count })
                 },
-                "failed" => Ok(EmbeddingStatus::Failed { 
-                    error: result[0].get::<_, String>(2) 
-                }),
+                "failed" => {
+                    let error_value = &first_row.values[2];
+                    let error_str = match error_value {
+                        PostgresDbValue::Text(s) => s.clone(),
+                        _ => return Err(anyhow::anyhow!("Invalid error value")),
+                    };
+                    Ok(EmbeddingStatus::Failed { error: error_str })
+                },
                 _ => Ok(EmbeddingStatus::NotProcessed),
             }
         }
@@ -822,18 +919,27 @@ impl EmbeddingGeneratorAgent for EmbeddingGeneratorAgentImpl {
 impl EmbeddingGeneratorAgentImpl {
     fn load_document(&self, connection: &mut DbConnection, document_id: &str) -> Result<Document> {
         let query = "SELECT id, title, content, metadata, created_at, updated_at FROM documents WHERE id = $1";
-        let result = connection.query(query, &[&document_id])?;
+        let result = connection.query(query, vec![PostgresDbValue::Text(document_id.to_string())])?;
         
-        if result.is_empty() {
+        if result.rows.is_empty() {
             return Err(anyhow::anyhow!("Document not found: {}", document_id));
         }
         
-        let row = &result[0];
+        let row = &result.rows[0];
         let document = Document {
             id: document_id.to_string(),
-            title: row.get::<_, String>(1),
-            content: row.get::<_, String>(2),
-            metadata: serde_json::from_str(&row.get::<_, String>(3))?,
+            title: match &row.values[1] {
+                PostgresDbValue::Text(title) => title.clone(),
+                _ => return Err(anyhow::anyhow!("Invalid title value")),
+            },
+            content: match &row.values[2] {
+                PostgresDbValue::Text(content) => content.clone(),
+                _ => return Err(anyhow::anyhow!("Invalid content value")),
+            },
+            metadata: match &row.values[3] {
+                PostgresDbValue::Text(metadata) => serde_json::from_str(metadata)?,
+                _ => return Err(anyhow::anyhow!("Invalid metadata value")),
+            },
         };
         
         Ok(document)
@@ -885,12 +991,12 @@ impl EmbeddingGeneratorAgentImpl {
                 created_at = EXCLUDED.created_at
         "#;
         
-        connection.execute(query, &[
-            &document_id,
-            &(chunk_index as i64),
-            chunk,
-            &embedding,
-            &Timestamp::now(),
+        connection.execute(query, vec![
+            PostgresDbValue::Text(document_id.to_string()),
+            PostgresDbValue::Int8(chunk_index as i64),
+            PostgresDbValue::Text(chunk.to_string()),
+            PostgresDbValue::Array(embedding.into_iter().map(|v| PostgresLazyDbValue::new(PostgresDbValue::Float4(v))).collect()),
+            PostgresDbValue::Text(Timestamp::now()),
         ])?;
         
         Ok(())
@@ -914,12 +1020,18 @@ impl EmbeddingGeneratorAgentImpl {
                 updated_at = EXCLUDED.updated_at
         "#;
         
-        connection.execute(query, &[
-            &document_id,
-            status_str,
-            &chunk_count,
-            &error_msg,
-            &Timestamp::now(),
+        connection.execute(query, vec![
+            PostgresDbValue::Text(document_id.to_string()),
+            PostgresDbValue::Text(status_str.to_string()),
+            match chunk_count {
+                Some(count) => PostgresDbValue::Int8(count),
+                None => PostgresDbValue::Null,
+            },
+            match error_msg {
+                Some(msg) => PostgresDbValue::Text(msg.to_string()),
+                None => PostgresDbValue::Null,
+            },
+            PostgresDbValue::Text(Timestamp::now()),
         ])?;
         
         Ok(())
@@ -1069,9 +1181,9 @@ impl RagCoordinatorAgent for RagCoordinatorAgentImpl {
             WHERE d.metadata->>'namespace' = $1
         "#;
         
-        let result = connection.query(query, &[&namespace])?;
+        let result = connection.query(query, vec![PostgresDbValue::Text(namespace.to_string())])?;
         
-        if result.is_empty() {
+        if result.rows.is_empty() {
             return Ok(ProcessingStatus {
                 namespace: namespace.to_string(),
                 total_documents: 0,
@@ -1083,15 +1195,33 @@ impl RagCoordinatorAgent for RagCoordinatorAgentImpl {
             });
         }
         
-        let row = &result[0];
+        let row = &result.rows[0];
         Ok(ProcessingStatus {
             namespace: namespace.to_string(),
-            total_documents: row.get::<_, i64>(0) as usize,
-            loaded_documents: row.get::<_, i64>(1) as usize,
-            completed_embeddings: row.get::<_, i64>(2) as usize,
-            failed_embeddings: row.get::<_, i64>(3) as usize,
-            in_progress_embeddings: row.get::<_, i64>(4) as usize,
-            last_updated: row.get::<_, Timestamp>(5),
+            total_documents: match &row.values[0] {
+                PostgresDbValue::Int8(n) => *n as usize,
+                _ => return Err(anyhow::anyhow!("Invalid total_documents value")),
+            },
+            loaded_documents: match &row.values[1] {
+                PostgresDbValue::Int8(n) => *n as usize,
+                _ => return Err(anyhow::anyhow!("Invalid loaded_documents value")),
+            },
+            completed_embeddings: match &row.values[2] {
+                PostgresDbValue::Int8(n) => *n as usize,
+                _ => return Err(anyhow::anyhow!("Invalid completed_embeddings value")),
+            },
+            failed_embeddings: match &row.values[3] {
+                PostgresDbValue::Int8(n) => *n as usize,
+                _ => return Err(anyhow::anyhow!("Invalid failed_embeddings value")),
+            },
+            in_progress_embeddings: match &row.values[4] {
+                PostgresDbValue::Int8(n) => *n as usize,
+                _ => return Err(anyhow::anyhow!("Invalid in_progress_embeddings value")),
+            },
+            last_updated: match &row.values[5] {
+                PostgresDbValue::Text(ts) => Timestamp::parse_str(ts)?,
+                _ => return Err(anyhow::anyhow!("Invalid last_updated value")),
+            },
         })
     }
     
@@ -1137,11 +1267,11 @@ impl RagCoordinatorAgent for RagCoordinatorAgentImpl {
 // Helper methods for RagCoordinatorAgent
 impl RagCoordinatorAgentImpl {
     fn invoke_document_loader(&mut self, namespace: Option<&str>) -> Result<Vec<String>> {
-        // In a real implementation, this would use Golem RPC to call the DocumentLoaderAgent
+        // In a real implementation, this would use Golem RPC to call the S3DocumentLoaderAgent
         // For now, we'll simulate the call
         
-        // Simulate RPC call to DocumentLoaderAgent
-        println!("Invoking DocumentLoaderAgent with namespace: {:?}", namespace);
+        // Simulate RPC call to S3DocumentLoaderAgent
+        println!("Invoking S3DocumentLoaderAgent with namespace: {:?}", namespace);
         
         // This would be: let document_ids = document_loader_agent.load_documents_from_namespace(namespace)?;
         // For simulation, we'll return mock IDs
@@ -1197,11 +1327,14 @@ impl RagCoordinatorAgentImpl {
             AND e.embedding_status = 'failed'
         "#;
         
-        let result = connection.query(query, &[&namespace])?;
+        let result = connection.query(query, vec![PostgresDbValue::Text(namespace.to_string())])?;
         
         let mut failed_ids = Vec::new();
-        for row in result {
-            let id_str = row.get::<_, String>(0);
+        for row in result.rows {
+            let id_str = match &row.values[0] {
+                PostgresDbValue::Text(id) => id.clone(),
+                _ => return Err(anyhow::anyhow!("Invalid document ID value")),
+            };
             failed_ids.push(id_str);
         }
         
@@ -1214,12 +1347,12 @@ impl RagCoordinatorAgentImpl {
             VALUES ($1, $2, $3, $4, $5)
         "#;
         
-        connection.execute(query, &[
-            namespace,
-            &(documents_loaded as i64),
-            &(embeddings_generated as i64),
-            &(embeddings_failed as i64),
-            &Timestamp::now(),
+        connection.execute(query, vec![
+            PostgresDbValue::Text(namespace.to_string()),
+            PostgresDbValue::Int8(documents_loaded as i64),
+            PostgresDbValue::Int8(embeddings_generated as i64),
+            PostgresDbValue::Int8(embeddings_failed as i64),
+            PostgresDbValue::Text(Timestamp::now()),
         ])?;
         
         Ok(())
@@ -1257,7 +1390,7 @@ if summary.embeddings_failed > 0 {
 
 ```rust
 // Manual coordination - use individual agents
-let loader = DocumentLoaderAgent::new();
+let loader = S3DocumentLoaderAgent::new();
 let document_ids = loader.load_documents_from_s3(Some("pdfs/"))?;
 
 let generator = EmbeddingGeneratorAgent::new();
@@ -1411,17 +1544,26 @@ impl DocumentAgent for DocumentAgentImpl {
             .map_err(|e| anyhow::anyhow!("Failed to connect to database: {:?}", e))?;
         
         let query = "SELECT id, title, content, metadata, created_at, updated_at FROM documents WHERE id = $1";
-        let result = connection.query(query, &[&document_id])?;
+        let result = connection.query(query, vec![PostgresDbValue::Text(document_id.to_string())])?;
         
-        if result.is_empty() {
+        if result.rows.is_empty() {
             Ok(None)
         } else {
-            let row = &result[0];
+            let row = &result.rows[0];
             let document = Document {
                 id: document_id.to_string(),
-                title: row.get::<_, String>(1),
-                content: row.get::<_, String>(2),
-                metadata: serde_json::from_str(&row.get::<_, String>(3))?,
+                title: match &row.values[1] {
+                    PostgresDbValue::Text(title) => title.clone(),
+                    _ => return Err(anyhow::anyhow!("Invalid title value")),
+                },
+                content: match &row.values[2] {
+                    PostgresDbValue::Text(content) => content.clone(),
+                    _ => return Err(anyhow::anyhow!("Invalid content value")),
+                },
+                metadata: match &row.values[3] {
+                    PostgresDbValue::Text(metadata) => serde_json::from_str(metadata)?,
+                    _ => return Err(anyhow::anyhow!("Invalid metadata value")),
+                },
             };
             Ok(Some(document))
         }
@@ -1442,15 +1584,24 @@ impl DocumentAgent for DocumentAgentImpl {
         let limit = limit.unwrap_or(50);
         let (sql_query, params) = self.build_document_list_query(filters, limit)?;
         
-        let result = connection.query(&sql_query, &params)?;
+        let result = connection.query(&sql_query, params)?;
         
         let mut documents = Vec::new();
-        for row in result {
+        for row in result.rows {
             let document = Document {
-                id: Uuid::parse_str(&row.get::<_, String>(0))?,
-                title: row.get::<_, String>(1),
+                id: match &row.values[0] {
+                    PostgresDbValue::Text(id) => id.clone(),
+                    _ => return Err(anyhow::anyhow!("Invalid document ID value")),
+                },
+                title: match &row.values[1] {
+                    PostgresDbValue::Text(title) => title.clone(),
+                    _ => return Err(anyhow::anyhow!("Invalid title value")),
+                },
                 content: String::new(), // Don't include content in list
-                metadata: serde_json::from_str(&row.get::<_, String>(2))?,
+                metadata: match &row.values[2] {
+                    PostgresDbValue::Text(metadata) => serde_json::from_str(metadata)?,
+                    _ => return Err(anyhow::anyhow!("Invalid metadata value")),
+                },
             };
             documents.push(document);
         }
@@ -1469,18 +1620,36 @@ impl DocumentAgent for DocumentAgentImpl {
             ORDER BY chunk_index
         "#;
         
-        let result = connection.query(query, &[&document_id.to_string()])?;
+        let result = connection.query(query, vec![PostgresDbValue::Text(document_id.to_string())])?;
         
         let mut chunks = Vec::new();
-        for row in result {
+        for row in result.rows {
             let chunk = DocumentChunk {
-                chunk_id: Uuid::parse_str(&row.get::<_, String>(0))?,
+                chunk_id: match &row.values[0] {
+                    PostgresDbValue::Text(id) => id.clone(),
+                    _ => return Err(anyhow::anyhow!("Invalid chunk ID value")),
+                },
                 document_id,
-                chunk_index: row.get::<_, i64>(1) as usize,
-                chunk_text: row.get::<_, String>(2),
-                start_pos: row.get::<_, i64>(3) as usize,
-                end_pos: row.get::<_, i64>(4) as usize,
-                token_count: row.get::<_, i64>(5) as usize,
+                chunk_index: match &row.values[1] {
+                    PostgresDbValue::Int8(n) => *n as usize,
+                    _ => return Err(anyhow::anyhow!("Invalid chunk index value")),
+                },
+                chunk_text: match &row.values[2] {
+                    PostgresDbValue::Text(text) => text.clone(),
+                    _ => return Err(anyhow::anyhow!("Invalid chunk text value")),
+                },
+                start_pos: match &row.values[3] {
+                    PostgresDbValue::Int8(n) => *n as usize,
+                    _ => return Err(anyhow::anyhow!("Invalid start position value")),
+                },
+                end_pos: match &row.values[4] {
+                    PostgresDbValue::Int8(n) => *n as usize,
+                    _ => return Err(anyhow::anyhow!("Invalid end position value")),
+                },
+                token_count: match &row.values[5] {
+                    PostgresDbValue::Int8(n) => *n as usize,
+                    _ => return Err(anyhow::anyhow!("Invalid token count value")),
+                },
             };
             chunks.push(chunk);
         }
@@ -1493,9 +1662,12 @@ impl DocumentAgent for DocumentAgentImpl {
             .map_err(|e| anyhow::anyhow!("Failed to connect to database: {:?}", e))?;
         
         let query = "SELECT COUNT(*) FROM documents WHERE id = $1";
-        let result = connection.query(query, &[&document_id])?;
+        let result = connection.query(query, vec![PostgresDbValue::Text(document_id.to_string())])?;
         
-        Ok(result.len() > 0 && result[0].get::<_, i64>(0) > 0)
+        Ok(!result.rows.is_empty() && match &result.rows[0].values[0] {
+            PostgresDbValue::Int8(count) => *count > 0,
+            _ => false,
+        })
     }
 }
 
@@ -1605,11 +1777,11 @@ pub trait SearchAgent {
     /// 
     /// # Arguments
     /// * `query` - Search query text
-    /// * `limit` - Maximum number of results to return (default: 10)
+    /// * `limit` - Maximum number of result.rowss to return (default: 10)
     /// * `threshold` - Similarity threshold (0.0 to 1.0, default: 0.7)
     /// 
     /// # Returns
-    /// List of search results with relevance scores
+    /// List of search result.rowss with relevance scores
     fn search(&self, query: &str, limit: Option<usize>, threshold: Option<f32>) -> Result<Vec<SearchResult>>;
     
     /// Search documents with metadata filters
@@ -1622,10 +1794,10 @@ pub trait SearchAgent {
     /// * `keyword_weight` - Weight for keyword search (0.0 to 1.0, default: 0.3)
     /// * `semantic_weight` - Weight for semantic search (0.0 to 1.0, default: 0.7)
     /// * `filters` - Optional metadata filters
-    /// * `limit` - Maximum number of results to return (default: 10)
+    /// * `limit` - Maximum number of result.rowss to return (default: 10)
     /// 
     /// # Returns
-    /// List of hybrid search results with combined relevance scores
+    /// List of hybrid search result.rowss with combined relevance scores
     fn hybrid_search(&self, query: &str, keyword_weight: Option<f32>, semantic_weight: Option<f32>, filters: Option<SearchFilters>, limit: Option<usize>) -> Result<Vec<HybridSearchResult>>;
     
     /// Get similar documents to a specific document
@@ -1717,18 +1889,18 @@ impl SearchAgent for SearchAgentImpl {
         let (sql_query, params) = self.build_search_query(&filters, limit, threshold)?;
         
         // Step 3: Execute similarity search using pgvector
-        let results = connection.query(&sql_query, &params)?;
+        let result = connection.query(&sql_query, &params)?;
         
         // Step 4: Process results and create SearchResult objects
         let mut search_results = Vec::new();
-        for row in results {
-            let result = self.create_search_result_from_row(row, &query_embedding)?;
-            search_results.push(result);
+        for row in result.rows {
+            let search_result = self.create_search_result_from_row(row, &query_embedding)?;
+            search_results.push(search_result);
         }
         
         // Step 5: Highlight matching text in results
-        for result in &mut search_results {
-            result.highlight = self.highlight_text(query, &result.chunk_text);
+        for search_result in &mut search_results {
+            search_result.highlight = self.highlight_text(query, &search_result.chunk_text);
         }
         
         Ok(search_results)
@@ -1742,13 +1914,26 @@ impl SearchAgent for SearchAgentImpl {
             .map_err(|e| anyhow::anyhow!("Failed to connect to database: {:?}", e))?;
         
         let query = "SELECT embedding FROM document_embeddings WHERE document_id = $1 AND chunk_index = 0 LIMIT 1";
-        let result = connection.query(query, &[&document_id])?;
+        let result = connection.query(query, vec![PostgresDbValue::Text(document_id.to_string())])?;
         
-        if result.is_empty() {
+        if result.rows.is_empty() {
             return Ok(vec![]);
         }
         
-        let reference_embedding: Vector = result[0].get::<_, Vector>(0);
+        let reference_embedding = match &result.rows[0].values[0] {
+            PostgresDbValue::Array(embedding_array) => {
+                // Convert PostgresDbValue array to Vector
+                let mut vector = Vec::new();
+                for element in embedding_array {
+                    let element_value = element.get();
+                    if let PostgresDbValue::Float4(val) = element_value {
+                        vector.push(*val as f32);
+                    }
+                }
+                vector
+            },
+            _ => return Err(anyhow::anyhow!("Invalid embedding value")),
+        };
         
         // Find similar documents using the reference embedding
         let similarity_query = format!(r#"
@@ -1765,11 +1950,22 @@ impl SearchAgent for SearchAgentImpl {
             LIMIT $3
         "#);
         
-        let similarity_results = connection.query(&similarity_query, &[&reference_embedding, &document_id.to_string(), &(limit as i64)])?;
+        let params = vec![
+            // This would be the actual embedding vector as PostgresDbValue::Array
+            // For now, using placeholder
+            PostgresDbValue::Text("embedding_placeholder".to_string()),
+            PostgresDbValue::Text(document_id.to_string()),
+            PostgresDbValue::Int8(limit as i64),
+        ];
+        
+        let similarity_result = connection.query(&similarity_query, &params)?;
         
         let mut similar_results = Vec::new();
-        for row in similarity_results {
-            let similarity_score = row.get::<_, f32>("similarity");
+        for row in similarity_result.rows {
+            let similarity_score = match &row.values[8] { // similarity is the 9th column (index 8)
+                PostgresDbValue::Float8(score) => *score as f32,
+                _ => return Err(anyhow::anyhow!("Invalid similarity score value")),
+            };
             let result = self.create_search_result_from_row(row, &reference_embedding)?;
             similar_results.push(result);
         }
@@ -1805,7 +2001,7 @@ impl SearchAgent for SearchAgentImpl {
             let doc_key = (semantic_result.document_id, semantic_result.chunk_index);
             seen_documents.insert(doc_key.clone());
             
-            // Find matching keyword result
+            // Find matching keyword results
             let keyword_score = keyword_results
                 .iter()
                 .find(|k| k.document_id == semantic_result.document_id && k.chunk_index == semantic_result.chunk_index)
@@ -1890,18 +2086,39 @@ impl SearchAgentImpl {
         let result = connection.query(&sql_query, &params)?;
         
         let mut keyword_results = Vec::new();
-        for row in result {
-            let keyword_score = row.get::<_, f32>("keyword_score");
-            let document_id = row.get::<_, String>("document_id");
-            let chunk_index = row.get::<_, i64>("chunk_index") as usize;
+        for row in result.rows {
+            let keyword_score = match &row.values[0] { // Assuming keyword_score is first column
+                PostgresDbValue::Float8(score) => *score as f32,
+                _ => return Err(anyhow::anyhow!("Invalid keyword score value")),
+            };
+            let document_id = match &row.values[1] { // Assuming document_id is second column
+                PostgresDbValue::Text(id) => id.clone(),
+                _ => return Err(anyhow::anyhow!("Invalid document ID value")),
+            };
+            let chunk_index = match &row.values[2] { // Assuming chunk_index is third column
+                PostgresDbValue::Int8(index) => *index as usize,
+                _ => return Err(anyhow::anyhow!("Invalid chunk index value")),
+            };
             
             keyword_results.push(HybridSearchResult {
                 document_id,
                 chunk_index,
-                chunk_text: row.get::<_, String>("chunk_text"),
-                title: row.get::<_, String>("title"),
-                metadata: serde_json::from_str(&row.get::<_, String>("metadata"))?,
-                highlight: self.highlight_text(query, &row.get::<_, String>("chunk_text")),
+                chunk_text: match &row.values[3] { // Assuming chunk_text is fourth column
+                    PostgresDbValue::Text(text) => text.clone(),
+                    _ => return Err(anyhow::anyhow!("Invalid chunk text value")),
+                },
+                title: match &row.values[4] { // Assuming title is fifth column
+                    PostgresDbValue::Text(title) => title.clone(),
+                    _ => return Err(anyhow::anyhow!("Invalid title value")),
+                },
+                metadata: match &row.values[5] { // Assuming metadata is sixth column
+                    PostgresDbValue::Text(metadata) => serde_json::from_str(metadata)?,
+                    _ => return Err(anyhow::anyhow!("Invalid metadata value")),
+                },
+                highlight: self.highlight_text(query, &match &row.values[3] {
+                    PostgresDbValue::Text(text) => text.clone(),
+                    _ => return Err(anyhow::anyhow!("Invalid chunk text value")),
+                }),
                 semantic_score: 0.0,
                 keyword_score,
                 combined_score: keyword_score,
@@ -2060,13 +2277,31 @@ impl SearchAgentImpl {
         Ok((sql_query, params))
     }
     
-    fn create_search_result_from_row(&self, row: golem_rust::bindings::golem::rdbms::types::Row, query_embedding: &Vector) -> Result<SearchResult> {
-        let document_id = row.get::<_, String>("id");
-        let chunk_index = row.get::<_, i64>("chunk_index") as usize;
-        let chunk_text = row.get::<_, String>("chunk_text");
-        let title = row.get::<_, String>("title");
-        let similarity_score = row.get::<_, f32>("similarity");
-        let metadata: DocumentMetadata = serde_json::from_str(&row.get::<_, String>("metadata"))?;
+    fn create_search_result_from_row(&self, row: &PostgresDbRow, query_embedding: &Vector) -> Result<SearchResult> {
+        let document_id = match &row.values[0] { // Assuming id is first column
+            PostgresDbValue::Text(id) => id.clone(),
+            _ => return Err(anyhow::anyhow!("Invalid document ID value")),
+        };
+        let chunk_index = match &row.values[1] { // Assuming chunk_index is second column
+            PostgresDbValue::Int8(index) => *index as usize,
+            _ => return Err(anyhow::anyhow!("Invalid chunk index value")),
+        };
+        let chunk_text = match &row.values[2] { // Assuming chunk_text is third column
+            PostgresDbValue::Text(text) => text.clone(),
+            _ => return Err(anyhow::anyhow!("Invalid chunk text value")),
+        };
+        let title = match &row.values[3] { // Assuming title is fourth column
+            PostgresDbValue::Text(title) => title.clone(),
+            _ => return Err(anyhow::anyhow!("Invalid title value")),
+        };
+        let similarity_score = match &row.values[4] { // Assuming similarity_score is fifth column
+            PostgresDbValue::Float8(score) => *score as f32,
+            _ => return Err(anyhow::anyhow!("Invalid similarity score value")),
+        };
+        let metadata = match &row.values[5] { // Assuming metadata is sixth column
+            PostgresDbValue::Text(metadata) => serde_json::from_str(metadata)?,
+            _ => return Err(anyhow::anyhow!("Invalid metadata value")),
+        };
         
         Ok(SearchResult {
             document_id,
@@ -2222,17 +2457,17 @@ let processing_summary = coordinator.process_s3_documents(Some("documents/"))?;
 
 // Step 2: Search for relevant information
 let search_agent = SearchAgent::new();
-let search_results = search_agent.search("your query here", Some(5), Some(0.8))?;
+let search_result.rowss = search_agent.search("your query here", Some(5), Some(0.8))?;
 
 // Step 3: Get full document content using DocumentAgent
 let document_agent = DocumentAgent::new();
-for result in search_results {
-    println!("Found relevant content in: {}", result.title);
-    println!("Relevance score: {:.2}", result.similarity_score);
-    println!("Content snippet: {}", result.chunk_text);
+for result.rows in search_result.rowss {
+    println!("Found relevant content in: {}", result.rows.title);
+    println!("Relevance score: {:.2}", result.rows.similarity_score);
+    println!("Content snippet: {}", result.rows.chunk_text);
     
     // Get full document if needed
-    if let Some(full_doc) = document_agent.get_document(result.document_id)? {
+    if let Some(full_doc) = document_agent.get_document(result.rows.document_id)? {
         // Use full document content for context
         println!("Full document length: {} chars", full_doc.content.len());
     }
@@ -2267,12 +2502,12 @@ SEARCH_AGENT_ID=search-agent
 
 ### Benefits of Search Agent
 
-1. **Semantic Search**: Uses vector similarity for meaningful results
+1. **Semantic Search**: Uses vector similarity for meaningful result.rowss
 2. **Hybrid Search**: Combines semantic and keyword search for better relevance
 3. **Flexible Filtering**: Filter by content type, tags, dates, S3 prefix, size
 4. **Configurable Weighting**: Adjust semantic vs keyword importance
 5. **Similar Documents**: Find documents similar to a given document
-6. **Text Highlighting**: Highlights matching portions in results
+6. **Text Highlighting**: Highlights matching portions in result.rowss
 7. **Match Type Classification**: Identifies semantic-only, keyword-only, or both matches
 8. **Performance Optimized**: Uses pgvector and PostgreSQL full-text search
 
@@ -2290,7 +2525,7 @@ SEARCH_AGENT_ID=search-agent
 - **Full-Text Search**: PostgreSQL tsvector and tsrank for keyword matching
 - **Hybrid Relevance**: Weighted combination of semantic and keyword scores
 - **Metadata Filtering**: Filter by document metadata
-- **Text Highlighting**: Highlights matching text in results
+- **Text Highlighting**: Highlights matching text in result.rowss
 - **Similar Document Discovery**: Find similar documents to a reference
 - **Match Type Analysis**: Distinguish between semantic and keyword matches
 
@@ -2331,8 +2566,14 @@ impl DocumentAgent for DocumentAgentImpl {
         connection.execute(
             "INSERT INTO documents (id, title, content, source, created_at, tags) 
              VALUES ($1, $2, $3, $4, $5, $6)",
-            &[&doc.id, &doc.title, &doc.content, &doc.metadata.source, 
-               &doc.metadata.created_at, &doc.metadata.tags]
+            vec![
+                PostgresDbValue::Text(doc.id),
+                PostgresDbValue::Text(doc.title),
+                PostgresDbValue::Text(doc.content),
+                PostgresDbValue::Text(doc.metadata.source),
+                PostgresDbValue::Text(doc.metadata.created_at),
+                PostgresDbValue::Text(serde_json::to_string(&doc.metadata.tags)?),
+            ]
         )?;
         Ok(doc.id)
     }
@@ -2427,7 +2668,13 @@ impl RagAgentImpl {
         connection.execute(
             "INSERT INTO embeddings (id, chunk_id, embedding, model_name, created_at) 
              VALUES ($1, $2, $3, $4, $5)",
-            &[&embedding_id, &chunk_id, &vector, &self.model_name, &Timestamp::now()]
+            vec![
+                PostgresDbValue::Text(embedding_id.to_string()),
+                PostgresDbValue::Text(chunk_id.to_string()),
+                PostgresDbValue::Array(vector.into_iter().map(|v| PostgresLazyDbValue::new(PostgresDbValue::Float4(v))).collect()),
+                PostgresDbValue::Text(self.model_name.clone()),
+                PostgresDbValue::Text(Timestamp::now()),
+            ]
         )?;
         
         Ok(embedding_id)
@@ -2460,8 +2707,8 @@ impl RagAgentImpl {
             &[&query_vector, &threshold, &limit]
         )?;
         
-        // Process results into SearchResult objects
-        self.process_search_results(rows)
+        // Process result.rowss into SearchResult objects
+        self.process_search_result.rowss(rows)
     }
 }
 ```
@@ -2509,7 +2756,7 @@ The proposal has been updated with four specialized agents that work together:
 
 ### ✅ Implemented Agents
 
-1. **DocumentLoaderAgent** - Loads documents from S3 to database
+1. **S3DocumentLoaderAgent** - Loads documents from S3 to database
 2. **EmbeddingGeneratorAgent** - Generates embeddings for specific documents  
 3. **RagCoordinatorAgent** - Orchestrates the complete workflow
 4. **DocumentAgent** - Retrieves document content and metadata (Ephemeral)
@@ -2519,11 +2766,11 @@ The proposal has been updated with four specialized agents that work together:
 
 | Agent | Purpose | Key Function | Input | Output | Type |
 |-------|---------|--------------|-------|--------|------|
-| DocumentLoaderAgent | S3 document ingestion | `load_documents_from_s3()` | S3 prefix | Document IDs | Persistent |
+| S3DocumentLoaderAgent | S3 document ingestion | `load_documents_from_s3()` | S3 prefix | Document IDs | Persistent |
 | EmbeddingGeneratorAgent | Vector generation | `generate_embeddings_for_document()` | Document ID | Embedding count | Persistent |
 | RagCoordinatorAgent | Workflow orchestration | `process_s3_documents()` | S3 prefix | Processing summary | Persistent |
 | DocumentAgent | Document retrieval | `get_document()` | Document ID | Document content | Ephemeral |
-| SearchAgent | Semantic search | `search()` | Query text | Search results | Ephemeral |
+| SearchAgent | Semantic search | `search()` | Query text | Search result.rowss | Ephemeral |
 
 ### 🔄 Complete Workflow
 
@@ -2744,10 +2991,10 @@ impl VectorSearchAgentImpl {
             similarity_threshold: 0.7,
         };
         
-        let search_results = search_agent.similarity_search(search_query)?;
+        let search_result.rowss = search_agent.similarity_search(search_query)?;
         
         // Assemble context
-        let context = self.assemble_context(search_results)?;
+        let context = self.assemble_context(search_result.rowss)?;
         
         // Generate response (mock for now)
         let response = self.generate_response(&query, &context)?;
@@ -2756,7 +3003,7 @@ impl VectorSearchAgentImpl {
             query,
             context,
             response,
-            sources: search_results.into_iter().map(|r| r.document.id).collect(),
+            sources: search_result.rowss.into_iter().map(|r| r.document.id).collect(),
         })
     }
 }
@@ -3008,7 +3255,7 @@ EMBEDDING_DIMENSIONS=384  # Model-specific dimensions
 ### 3. Context-Aware Search
 - Conversation history integration
 - Query expansion and rewriting
-- Personalized result ranking
+- Personalized result.rows ranking
 
 ## Text Chunking Strategy
 
@@ -3043,7 +3290,7 @@ pub struct ChunkConfig {
 ### Search Performance
 
 1. **Approximate Nearest Neighbor**: Fast similarity search
-2. **Result Caching**: Cache common query results
+2. **Result Caching**: Cache common query result.rowss
 3. **Pre-filtering**: Metadata-based filtering before vector search
 4. **Parallel Processing**: Concurrent embedding generation
 
@@ -3089,7 +3336,7 @@ pub struct RagConfig {
 ### Unit Tests
 - Embedding generation accuracy
 - Chunking algorithm correctness
-- Search result relevance
+- Search result.rows relevance
 - Database operations
 
 ### Integration Tests
@@ -3232,7 +3479,7 @@ DEFAULT_SEARCH_LIMIT=10
 - Database operations with test fixtures
 - Embedding generation accuracy tests
 - Chunking algorithm edge cases
-- Search result ranking validation
+- Search result.rows ranking validation
 
 ### Integration Tests
 - End-to-end RAG pipeline workflows
@@ -3292,7 +3539,7 @@ This approach ensures the RAG system is fully compatible with Golem's WASM const
 - System uptime > 99.9%
 
 ### Business Metrics
-- User satisfaction with search results
+- User satisfaction with search result.rowss
 - Document processing efficiency
 - Query success rate
 - System adoption and usage patterns
