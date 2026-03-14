@@ -151,3 +151,13 @@ pub struct DocumentFilters {
     pub content_types: Vec<ContentType>,
     pub date_range: Option<DateRange>,
 }
+
+// Use existing SearchResult and SearchFilters from above
+pub type HybridSearchResult = SearchResult;
+
+#[derive(Clone, Debug, Schema, Serialize, Deserialize)]
+pub enum MatchType {
+    SemanticOnly,     // Only semantic match
+    KeywordOnly,      // Only keyword match
+    BothMatch,        // Both semantic and keyword match
+}
