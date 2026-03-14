@@ -8,10 +8,11 @@ This proposal outlines a comprehensive RAG (Retrieval-Augmented Generation) pipe
 
 ### Core Components
 
-1. **Document Loader Agent** (`DocumentLoaderAgent`)
-   - Loads documents from S3 to database with optional prefix filtering
+1. **S3 Document Loader Agent** (`S3DocumentLoaderAgent`)
+   - Loads documents from S3 to database using namespace-based organization
    - Handles S3 integration with configurable endpoints
    - Manages duplicate detection and content type inference
+   - Maps S3 prefixes to logical namespaces
 
 2. **Embedding Generator Agent** (`EmbeddingGeneratorAgent`)
    - Generates and stores embeddings for specific documents
@@ -20,7 +21,7 @@ This proposal outlines a comprehensive RAG (Retrieval-Augmented Generation) pipe
 
 3. **RAG Coordinator Agent** (`RagCoordinatorAgent`)
    - Orchestrates document loading and embedding generation workflow
-   - Coordinates between DocumentLoaderAgent and EmbeddingGeneratorAgent
+   - Coordinates between S3DocumentLoaderAgent and EmbeddingGeneratorAgent
    - Provides comprehensive processing status and retry mechanisms
 
 4. **Document Agent** (`DocumentAgent`) - **Ephemeral**
@@ -36,10 +37,83 @@ This proposal outlines a comprehensive RAG (Retrieval-Augmented Generation) pipe
 ### Data Flow
 
 ```
-S3 Storage → DocumentLoaderAgent → Database → EmbeddingGeneratorAgent → Embeddings → SearchAgent → Search Results
+S3 Storage → S3DocumentLoaderAgent → Database → EmbeddingGeneratorAgent → Embeddings → SearchAgent → Search Results
                                                                  ↓
                                                           DocumentAgent → Document Content
 ```
+
+### Generic Source Metadata
+
+The `DocumentMetadata` uses a generic `source_metadata` field to store source-specific information:
+
+```rust
+pub source_metadata: serde_json::Value, // Source-specific metadata
+```
+
+#### **Source Metadata Examples**
+
+**S3 Source:**
+```json
+{
+  "s3_key": "documents/legal/contract.pdf",
+  "s3_bucket": "my-documents",
+  "etag": "abc123def456",
+  "last_modified": "2023-12-01T10:30:00Z"
+}
+```
+
+**Local File Source:**
+```json
+{
+  "file_path": "/data/company/docs/report.pdf",
+  "file_size": 1024000,
+  "file_hash": "sha256:abc123...",
+  "last_modified": "2023-12-01T10:30:00Z"
+}
+```
+
+**Azure Blob Storage:**
+```json
+{
+  "azure_container": "documents",
+  "azure_blob": "technical/api-spec.md",
+  "azure_account": "mystorageaccount",
+  "etag": "0x8D4BCC2E4835CD0"
+}
+```
+
+**Google Cloud Storage:**
+```json
+{
+  "gcs_bucket": "my-bucket",
+  "gcs_object": "reports/q4-2023.pdf",
+  "generation": "1672531200000000",
+  "md5_hash": "CY9rzUYO03HRzWiKssYcTw=="
+}
+```
+
+This approach allows:
+- **Multi-source support**: Each source can store its specific metadata
+- **Extensibility**: Easy to add new sources without schema changes
+- **Query flexibility**: Source metadata can be queried with JSON operators
+- **Backward compatibility**: Existing documents remain valid
+
+### Namespace Concept
+
+**Namespace** provides a logical organization layer for documents, independent of their physical storage location:
+
+```
+Physical Storage (S3)          Logical Namespace
+s3://my-bucket/docs/legal/  →  legal/
+s3://my-bucket/docs/tech/   →  technical/
+s3://my-bucket/data/reports/ →  reports/
+```
+
+This allows:
+- **Multi-source support**: Different storage backends can map to namespaces
+- **Hierarchical organization**: Nested namespaces for better categorization
+- **Access control**: Namespace-based permissions and filtering
+- **Future extensibility**: Easy to add new document sources
 
 ### Agent Workflow
 
@@ -70,11 +144,14 @@ pub struct Document {
 
 #[derive(Clone, Debug, Schema, Serialize, Deserialize)]
 pub struct DocumentMetadata {
-    pub source: String,
-    pub created_at: String, // ISO timestamp
-    pub updated_at: String, // ISO timestamp
+    pub source: String,           // e.g., "s3", "local", "azure", "gcs"
+    pub namespace: String,        // Logical namespace (e.g., "legal", "technical/reports")
+    pub created_at: String,       // ISO timestamp
+    pub updated_at: String,       // ISO timestamp
     pub tags: Vec<String>,
     pub content_type: ContentType,
+    pub size_bytes: u64,
+    pub source_metadata: serde_json::Value, // Source-specific metadata (S3 keys, Azure paths, etc.)
     pub metadata: serde_json::Value, // Additional metadata
 }
 
@@ -237,153 +314,272 @@ let documents = s3_client.list_objects(&s3_config.bucket, Some("documents/"))?;
 let content = s3_client.get_object(&s3_config.bucket, &document_key)?;
 ```
 
-### Document Loader Agent
+### S3 Document Loader Agent
 
-**Purpose**: Load documents from S3 to database with optional prefix filtering
+**Purpose**: Load documents from S3 to database using namespace-based organization
 
 ```rust
 #[agent_definition]
-pub trait DocumentLoaderAgent {
+pub trait S3DocumentLoaderAgent {
     fn new() -> Self;
     
-    /// Load documents from S3 to database
+    /// Load documents from S3 using namespace mapping
     /// 
     /// # Arguments
-    /// * `s3_prefix` - Optional S3 prefix to filter documents (e.g., "documents/", "pdfs/")
+    /// * `namespace` - Logical namespace (e.g., "legal", "technical/reports")
     /// 
     /// # Returns
     /// List of document IDs that were successfully loaded
-    fn load_documents_from_s3(&mut self, s3_prefix: Option<&str>) -> Result<Vec<Uuid>>;
+    fn load_documents_from_namespace(&mut self, namespace: &str) -> Result<Vec<Uuid>>;
     
-    /// List available documents in S3 (without loading)
-    fn list_s3_documents(&self, s3_prefix: Option<&str>) -> Result<Vec<S3DocumentSource>>;
+    /// List available S3 documents for a namespace
+    fn list_namespace_documents(&self, namespace: &str) -> Result<Vec<S3DocumentSource>>;
+    
+    /// Map namespace to S3 prefix
+    fn namespace_to_s3_prefix(&self, namespace: &str) -> Result<String>;
+    
+    /// Add namespace mapping
+    fn add_namespace_mapping(&mut self, namespace: &str, s3_prefix: &str) -> Result<()>;
+    
+    /// List all configured namespaces
+    fn list_namespaces(&self) -> Result<Vec<String>>;
 }
 
-struct DocumentLoaderAgentImpl {
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct S3DocumentSource {
+    pub key: String,
+    pub size_bytes: u64,
+    pub last_modified: String,
+    pub content_type: Option<String>,
+    pub etag: Option<String>,
+    pub namespace: String, // Logical namespace
+}
+
+struct S3DocumentLoaderAgentImpl {
     db_url: String,
     s3_client: S3Client,
-    s3_bucket: String,
+    namespace_mappings: std::collections::HashMap<String, String>, // namespace -> s3_prefix
 }
 
 #[agent_implementation]
-impl DocumentLoaderAgent for DocumentLoaderAgentImpl {
+impl S3DocumentLoaderAgent for S3DocumentLoaderAgentImpl {
     fn new() -> Self {
         let db_url = env::var("DB_URL")
             .expect("DB_URL environment variable must be set");
         
-        let s3_client = S3Client::new(
-            env::var("AWS_ACCESS_KEY_ID").expect("AWS_ACCESS_KEY_ID required"),
-            env::var("AWS_SECRET_ACCESS_KEY").expect("AWS_SECRET_ACCESS_KEY required"),
-            env::var("AWS_REGION").expect("AWS_REGION required"),
-            env::var("S3_ENDPOINT_URL").ok(), // Optional custom endpoint
-        ).expect("Failed to create S3 client");
+        let s3_endpoint = env::var("S3_ENDPOINT_URL").ok();
+        let s3_client = S3Client::new(s3_endpoint);
         
-        let s3_bucket = env::var("AWS_S3_BUCKET")
-            .expect("AWS_S3_BUCKET required");
-        
-        Self { db_url, s3_client, s3_bucket }
+        Self { 
+            db_url, 
+            s3_client,
+            namespace_mappings: std::collections::HashMap::new(),
+        }
     }
     
-    fn load_documents_from_s3(&mut self, s3_prefix: Option<&str>) -> Result<Vec<Uuid>> {
-        let s3_response = self.s3_client.list_objects(&self.s3_bucket, s3_prefix)?;
+    fn load_documents_from_namespace(&mut self, namespace: &str) -> Result<Vec<Uuid>> {
+        // Step 1: Map namespace to S3 prefix
+        let s3_prefix = self.namespace_to_s3_prefix(namespace)?;
+        
+        // Step 2: List documents in S3
+        let s3_documents = self.list_s3_documents(&s3_prefix)?;
+        
+        // Step 3: Process each document
         let mut loaded_document_ids = Vec::new();
         
-        // Connect to database
-        let mut connection = DbConnection::open(&self.db_url)
-            .map_err(|e| anyhow::anyhow!("Failed to connect to database: {:?}", e))?;
-        
-        for s3_doc in s3_response.objects {
-            // Skip non-document files
-            if !self.is_document_file(&s3_doc.key) {
+        for mut s3_doc in s3_documents {
+            s3_doc.namespace = namespace.to_string();
+            
+            // Check if document already exists
+            if self.document_exists(&s3_doc.key)? {
+                println!("Document {} already exists, skipping", s3_doc.key);
                 continue;
             }
             
-            // Check if document already exists
-            if self.document_exists(&mut connection, &s3_doc.key)? {
-                continue; // Skip already loaded documents
-            }
-            
             // Download document content
-            let content = self.s3_client.get_object(&self.s3_bucket, &s3_doc.key)?;
-            let content_str = String::from_utf8(content)?;
+            let content = self.s3_client.get_object(&s3_doc.key)?;
             
-            // Create document record
-            let document_id = Uuid::new_v4();
+            // Infer content type
+            let content_type = s3_doc.content_type
+                .or_else(|| self.infer_content_type(&s3_doc.key))
+                .unwrap_or_else(|| "application/octet-stream".to_string());
+            
+            // Create document
             let document = Document {
-                id: document_id,
-                title: s3_doc.key.split('/').last().unwrap_or(&s3_doc.key).to_string(),
-                content: content_str,
+                id: Uuid::new_v4(),
+                title: self.extract_title_from_key(&s3_doc.key),
+                content: String::from_utf8(content)?,
                 metadata: DocumentMetadata {
-                    source: format!("s3://{}/{}", self.s3_bucket, s3_doc.key),
-                    content_type: self.infer_content_type(&s3_doc.key),
-                    created_at: Timestamp::now(),
-                    updated_at: Timestamp::now(),
+                    source: "s3".to_string(),
+                    namespace: namespace.to_string(),
+                    created_at: s3_doc.last_modified.clone(),
+                    updated_at: s3_doc.last_modified.clone(),
                     tags: vec!["s3".to_string(), "auto-loaded".to_string()],
-                    metadata: serde_json::json!({
-                        "s3_bucket": self.s3_bucket,
+                    content_type: self.map_content_type(&content_type),
+                    size_bytes: s3_doc.size_bytes,
+                    source_metadata: serde_json::json!({
                         "s3_key": s3_doc.key,
-                        "size_bytes": s3_doc.size_bytes,
+                        "s3_bucket": self.s3_client.bucket,
+                        "etag": s3_doc.etag,
                         "last_modified": s3_doc.last_modified,
+                    }),
+                    metadata: serde_json::json!({
+                        "namespace": namespace,
                     }),
                 },
             };
             
             // Store document in database
-            self.store_document(&mut connection, document)?;
+            let document_id = self.store_document(document)?;
             loaded_document_ids.push(document_id);
+            
+            println!("Loaded document: {} (ID: {}) from namespace: {}", s3_doc.key, document_id, namespace);
         }
         
         Ok(loaded_document_ids)
     }
     
-    fn list_s3_documents(&self, s3_prefix: Option<&str>) -> Result<Vec<S3DocumentSource>> {
-        let response = self.s3_client.list_objects(&self.s3_bucket, s3_prefix)?;
-        Ok(response.objects)
-    }
-}
-
-// Helper methods for DocumentLoaderAgent
-impl DocumentLoaderAgentImpl {
-    fn is_document_file(&self, key: &str) -> bool {
-        key.ends_with(".txt") || key.ends_with(".md") || 
-        key.ends_with(".pdf") || key.ends_with(".docx") ||
-        key.ends_with(".rtf") || key.ends_with(".html")
-    }
-    
-    fn infer_content_type(&self, key: &str) -> String {
-        match key.split('.').last() {
-            Some("txt") => "text/plain".to_string(),
-            Some("md") => "text/markdown".to_string(),
-            Some("pdf") => "application/pdf".to_string(),
-            Some("docx") => "application/vnd.openxmlformats-officedocument.wordprocessingml.document".to_string(),
-            Some("rtf") => "application/rtf".to_string(),
-            Some("html") => "text/html".to_string(),
-            _ => "application/octet-stream".to_string(),
+    fn list_namespace_documents(&self, namespace: &str) -> Result<Vec<S3DocumentSource>> {
+        let s3_prefix = self.namespace_to_s3_prefix(namespace)?;
+        let mut documents = self.list_s3_documents(&s3_prefix)?;
+        for doc in &mut documents {
+            doc.namespace = namespace.to_string();
         }
+        Ok(documents)
     }
     
-    fn document_exists(&self, connection: &mut DbConnection, s3_key: &str) -> Result<bool> {
-        let query = "SELECT COUNT(*) FROM documents WHERE metadata->>'s3_key' = $1";
-        let result = connection.query(query, &[&s3_key])?;
+    fn namespace_to_s3_prefix(&self, namespace: &str) -> Result<String> {
+        // Check for explicit mapping
+        if let Some(prefix) = self.namespace_mappings.get(namespace) {
+            return Ok(prefix.clone());
+        }
+        
+        // Default mapping: namespace -> s3_prefix
+        // e.g., "legal" -> "documents/legal/"
+        // e.g., "technical/reports" -> "documents/technical/reports/"
+        let default_prefix = format!("documents/{}/", namespace.trim_start_matches('/'));
+        Ok(default_prefix)
+    }
+    
+    fn add_namespace_mapping(&mut self, namespace: &str, s3_prefix: &str) -> Result<()> {
+        self.namespace_mappings.insert(namespace.to_string(), s3_prefix.to_string());
+        Ok(())
+    }
+    
+    fn list_namespaces(&self) -> Result<Vec<String>> {
+        let mut namespaces = self.namespace_mappings.keys().cloned().collect::<Vec<_>>();
+        namespaces.sort();
+        Ok(namespaces)
+    }
+
+// Helper methods for S3DocumentLoaderAgent
+impl S3DocumentLoaderAgentImpl {
+    fn list_s3_documents(&self, s3_prefix: &str) -> Result<Vec<S3DocumentSource>> {
+        let objects = self.s3_client.list_objects(s3_prefix)?;
+        let mut documents = Vec::new();
+        
+        for obj in objects {
+            // Skip directories and empty objects
+            if obj.size_bytes == 0 {
+                continue;
+            }
+            
+            let document = S3DocumentSource {
+                key: obj.key.clone(),
+                size_bytes: obj.size_bytes,
+                last_modified: obj.last_modified.to_rfc3339(),
+                content_type: obj.content_type,
+                etag: obj.etag,
+                namespace: String::new(), // Will be set by caller
+            };
+            
+            documents.push(document);
+        }
+        
+        Ok(documents)
+    }
+    
+    fn document_exists(&self, s3_key: &str) -> Result<bool> {
+        let mut connection = DbConnection::open(&self.db_url)?;
+        
+        let query = "SELECT COUNT(*) FROM documents WHERE metadata->'source_metadata'->>'s3_key' = $1";
+        let result = connection.query(query, &[s3_key])?;
+        
         Ok(result.len() > 0 && result[0].get::<_, i64>(0) > 0)
     }
     
-    fn store_document(&self, connection: &mut DbConnection, document: Document) -> Result<()> {
-        let query = r#"
-            INSERT INTO documents (id, title, content, metadata, created_at, updated_at)
-            VALUES ($1, $2, $3, $4, $5, $6)
-        "#;
+    fn store_document(&self, document: Document) -> Result<Uuid> {
+        let mut connection = DbConnection::open(&self.db_url)?;
         
-        connection.execute(query, &[
-            &document.id.to_string(),
-            &document.title,
-            &document.content,
-            &serde_json::to_string(&document.metadata)?,
-            &document.metadata.created_at,
-            &document.metadata.updated_at,
-        ])?;
+        let document_id = document.id;
         
-        Ok(())
+        connection.execute(
+            "INSERT INTO documents (id, title, content, metadata, created_at, updated_at, tags, source, namespace, size_bytes) 
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)",
+            &[
+                &document_id.to_string(),
+                &document.title,
+                &document.content,
+                &serde_json::to_string(&document.metadata)?,
+                &document.metadata.created_at,
+                &document.metadata.updated_at,
+                &serde_json::to_string(&document.metadata.tags)?,
+                &document.metadata.source,
+                &document.metadata.namespace,
+                &document.metadata.size_bytes,
+            ]
+        )?;
+        
+        Ok(document_id)
+    }
+    
+    fn infer_content_type(&self, key: &str) -> Option<String> {
+        let key_lower = key.to_lowercase();
+        
+        if key_lower.ends_with(".txt") {
+            Some("text/plain".to_string())
+        } else if key_lower.ends_with(".md") {
+            Some("text/markdown".to_string())
+        } else if key_lower.ends_with(".pdf") {
+            Some("application/pdf".to_string())
+        } else if key_lower.ends_with(".html") || key_lower.ends_with(".htm") {
+            Some("text/html".to_string())
+        } else if key_lower.ends_with(".json") {
+            Some("application/json".to_string())
+        } else {
+            None
+        }
+    }
+    
+    fn map_content_type(&self, content_type: &str) -> ContentType {
+        match content_type {
+            "text/plain" => ContentType::Text,
+            "text/markdown" => ContentType::Markdown,
+            "application/pdf" => ContentType::Pdf,
+            "text/html" => ContentType::Html,
+            "application/json" => ContentType::Json,
+            _ => ContentType::Text,
+        }
+    }
+    
+    fn extract_title_from_key(&self, key: &str) -> String {
+        // Extract filename from S3 key and remove extension
+        let filename = key.split('/').last().unwrap_or(key);
+        let title = filename.split('.').next().unwrap_or(filename);
+        
+        // Convert to title case
+        title.replace('_', " ")
+            .replace("-", " ")
+            .split_whitespace()
+            .map(|word| {
+                let mut chars = word.chars();
+                match chars.next() {
+                    None => String::new(),
+                    Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
+                }
+            })
+            .collect::<Vec<_>>()
+            .join(" ")
     }
 }
 ```
@@ -612,25 +808,31 @@ impl EmbeddingGeneratorAgentImpl {
 pub trait RagCoordinatorAgent {
     fn new() -> Self;
     
-    /// Process documents from S3 with automatic embedding generation
+    /// Process documents from namespace with automatic embedding generation
     /// 
     /// # Arguments
-    /// * `s3_prefix` - Optional S3 prefix to filter documents (e.g., "documents/", "pdfs/")
+    /// * `namespace` - Logical namespace to process (e.g., "legal", "technical/reports")
     /// 
     /// # Returns
     /// Processing summary with document IDs and embedding counts
-    fn process_s3_documents(&mut self, s3_prefix: Option<&str>) -> Result<ProcessingSummary>;
+    fn process_namespace_documents(&mut self, namespace: &str) -> Result<ProcessingSummary>;
     
-    /// Get processing status for a specific S3 prefix
-    fn get_processing_status(&self, s3_prefix: &str) -> Result<ProcessingStatus>;
+    /// Get processing status for a specific namespace
+    fn get_processing_status(&self, namespace: &str) -> Result<ProcessingStatus>;
     
-    /// Retry failed embeddings for documents
-    fn retry_failed_embeddings(&mut self, s3_prefix: Option<&str>) -> Result<RetrySummary>;
+    /// Retry failed embeddings for a namespace
+    fn retry_failed_embeddings(&mut self, namespace: &str) -> Result<RetrySummary>;
+    
+    /// List all available namespaces
+    fn list_namespaces(&self) -> Result<Vec<String>>;
+    
+    /// Add namespace mapping (for custom S3 prefixes)
+    fn add_namespace_mapping(&mut self, namespace: &str, s3_prefix: &str) -> Result<()>;
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ProcessingSummary {
-    pub s3_prefix: String,
+    pub namespace: String,
     pub documents_loaded: usize,
     pub document_ids: Vec<Uuid>,
     pub embeddings_generated: usize,
