@@ -42,60 +42,104 @@ S3 Storage → S3DocumentLoaderAgent → Database → EmbeddingGeneratorAgent �
                                                           DocumentAgent → Document Content
 ```
 
+### Namespace Convention
+
+The system uses a **simple convention-based approach** for namespace to S3 prefix mapping:
+
+```
+Namespace                    → S3 Prefix
+"legal"                     → "documents/legal/"
+"technical/reports"         → "documents/technical/reports/"
+"public/docs"               → "documents/public/docs/"
+"hr/policies"               → "documents/hr/policies/"
+```
+
+#### **Benefits of Convention-Based Approach**
+
+1. **Simplicity**: No complex mapping configuration
+2. **Predictability**: Always follows the `documents/{namespace}/` pattern
+3. **No State**: No need to maintain mapping tables
+4. **Easy Debugging**: Clear relationship between namespace and S3 location
+5. **Consistency**: Uniform structure across all namespaces
+
+#### **S3 Structure Example**
+```
+s3://my-bucket/
+├── documents/
+│   ├── legal/
+│   │   ├── contract-2023.pdf
+│   │   └── privacy-policy.md
+│   ├── technical/
+│   │   ├── reports/
+│   │   │   ├── q4-2023.pdf
+│   │   │   └── api-spec.md
+│   │   └── guides/
+│   │       └── setup-guide.md
+│   ├── public/
+│   │   └── blog-posts/
+│   │       └── announcement.md
+│   └── hr/
+│       └── policies/
+│           └── employee-handbook.pdf
+```
+
+This approach ensures that:
+- **Namespace** is the logical organization layer
+- **S3 prefix** follows a predictable pattern
+- **No configuration** is required for basic usage
+- **Easy to understand** and maintain
+
 ### Generic Source Metadata
 
 The `DocumentMetadata` uses a generic `source_metadata` field to store source-specific information:
 
 ```rust
-pub source_metadata: serde_json::Value, // Source-specific metadata
+pub source_metadata: std::collections::HashMap<String, String>, // Source-specific metadata
 ```
 
 #### **Source Metadata Examples**
 
 **S3 Source:**
-```json
-{
-  "s3_key": "documents/legal/contract.pdf",
-  "s3_bucket": "my-documents",
-  "etag": "abc123def456",
-  "last_modified": "2023-12-01T10:30:00Z"
-}
+```rust
+let mut source_metadata = std::collections::HashMap::new();
+source_metadata.insert("s3_key".to_string(), "documents/legal/contract.pdf".to_string());
+source_metadata.insert("s3_bucket".to_string(), "my-documents".to_string());
+source_metadata.insert("etag".to_string(), "abc123def456".to_string());
+source_metadata.insert("last_modified".to_string(), "2023-12-01T10:30:00Z".to_string());
 ```
 
 **Local File Source:**
-```json
-{
-  "file_path": "/data/company/docs/report.pdf",
-  "file_size": 1024000,
-  "file_hash": "sha256:abc123...",
-  "last_modified": "2023-12-01T10:30:00Z"
-}
+```rust
+let mut source_metadata = std::collections::HashMap::new();
+source_metadata.insert("file_path".to_string(), "/data/company/docs/report.pdf".to_string());
+source_metadata.insert("file_size".to_string(), "1024000".to_string());
+source_metadata.insert("file_hash".to_string(), "sha256:abc123...".to_string());
+source_metadata.insert("last_modified".to_string(), "2023-12-01T10:30:00Z".to_string());
 ```
 
 **Azure Blob Storage:**
-```json
-{
-  "azure_container": "documents",
-  "azure_blob": "technical/api-spec.md",
-  "azure_account": "mystorageaccount",
-  "etag": "0x8D4BCC2E4835CD0"
-}
+```rust
+let mut source_metadata = std::collections::HashMap::new();
+source_metadata.insert("azure_container".to_string(), "documents".to_string());
+source_metadata.insert("azure_blob".to_string(), "technical/api-spec.md".to_string());
+source_metadata.insert("azure_account".to_string(), "mystorageaccount".to_string());
+source_metadata.insert("etag".to_string(), "0x8D4BCC2E4835CD0".to_string());
 ```
 
 **Google Cloud Storage:**
-```json
-{
-  "gcs_bucket": "my-bucket",
-  "gcs_object": "reports/q4-2023.pdf",
-  "generation": "1672531200000000",
-  "md5_hash": "CY9rzUYO03HRzWiKssYcTw=="
-}
+```rust
+let mut source_metadata = std::collections::HashMap::new();
+source_metadata.insert("gcs_bucket".to_string(), "my-bucket".to_string());
+source_metadata.insert("gcs_object".to_string(), "reports/q4-2023.pdf".to_string());
+source_metadata.insert("generation".to_string(), "1672531200000000".to_string());
+source_metadata.insert("md5_hash".to_string(), "CY9rzUYO03HRzWiKssYcTw==".to_string());
 ```
 
 This approach allows:
 - **Multi-source support**: Each source can store its specific metadata
+- **Type safety**: HashMap ensures string keys and values
 - **Extensibility**: Easy to add new sources without schema changes
-- **Query flexibility**: Source metadata can be queried with JSON operators
+- **Query flexibility**: Source metadata can be queried with string operators
 - **Backward compatibility**: Existing documents remain valid
 
 ### Namespace Concept
@@ -119,7 +163,7 @@ This allows:
 
 ```
 RagCoordinatorAgent (Orchestrator)
-    ├── DocumentLoaderAgent → S3 Storage → Database
+    ├── S3DocumentLoaderAgent → S3 Storage → Database
     ├── EmbeddingGeneratorAgent → Embedding Model → Database
     └── SearchAgent → Database (with pgvector) → Search Results
 ```
@@ -136,7 +180,7 @@ use uuid::Uuid;
 // Document management
 #[derive(Clone, Debug, Schema, Serialize, Deserialize)]
 pub struct Document {
-    pub id: Uuid,
+    pub id: String,              // String representation of UUID
     pub title: String,
     pub content: String,
     pub metadata: DocumentMetadata,
@@ -151,8 +195,8 @@ pub struct DocumentMetadata {
     pub tags: Vec<String>,
     pub content_type: ContentType,
     pub size_bytes: u64,
-    pub source_metadata: serde_json::Value, // Source-specific metadata (S3 keys, Azure paths, etc.)
-    pub metadata: serde_json::Value, // Additional metadata
+    pub source_metadata: std::collections::HashMap<String, String>, // Source-specific metadata
+    pub metadata: std::collections::HashMap<String, String>, // Additional metadata
 }
 
 #[derive(Clone, Debug, Schema, Serialize, Deserialize)]
@@ -167,8 +211,8 @@ pub enum ContentType {
 // Text chunking
 #[derive(Clone, Debug, Schema, Serialize, Deserialize)]
 pub struct DocumentChunk {
-    pub id: Uuid,
-    pub document_id: Uuid,
+    pub id: String,              // String representation of UUID
+    pub document_id: String,     // String representation of UUID
     pub content: String,
     pub chunk_index: u32,
     pub start_pos: u32,
@@ -179,8 +223,8 @@ pub struct DocumentChunk {
 // Vector embeddings
 #[derive(Clone, Debug, Schema, Serialize, Deserialize)]
 pub struct Embedding {
-    pub id: Uuid,
-    pub chunk_id: Uuid,
+    pub id: String,              // String representation of UUID
+    pub chunk_id: String,         // String representation of UUID
     pub vector: Vec<f32>,
     pub model_name: String,
     pub created_at: String, // ISO timestamp
@@ -249,7 +293,7 @@ pub struct IndexingRequest {
 
 #[derive(Clone, Debug, Schema, Serialize, Deserialize)]
 pub struct IndexingResult {
-    pub document_id: Uuid,
+    pub document_id: String,       // String representation of UUID
     pub chunks_created: u32,
     pub embeddings_generated: u32,
 }
@@ -259,7 +303,7 @@ pub struct RagResponse {
     pub query: String,
     pub context: Vec<DocumentChunk>,
     pub response: String,
-    pub sources: Vec<Uuid>,
+    pub sources: Vec<String>,      // String representations of UUIDs
 }
 
 #[derive(Clone, Debug, Schema, Serialize, Deserialize)]
@@ -330,19 +374,10 @@ pub trait S3DocumentLoaderAgent {
     /// 
     /// # Returns
     /// List of document IDs that were successfully loaded
-    fn load_documents_from_namespace(&mut self, namespace: &str) -> Result<Vec<Uuid>>;
+    fn load_documents_from_namespace(&mut self, namespace: &str) -> Result<Vec<String>>;
     
     /// List available S3 documents for a namespace
     fn list_namespace_documents(&self, namespace: &str) -> Result<Vec<S3DocumentSource>>;
-    
-    /// Map namespace to S3 prefix
-    fn namespace_to_s3_prefix(&self, namespace: &str) -> Result<String>;
-    
-    /// Add namespace mapping
-    fn add_namespace_mapping(&mut self, namespace: &str, s3_prefix: &str) -> Result<()>;
-    
-    /// List all configured namespaces
-    fn list_namespaces(&self) -> Result<Vec<String>>;
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -358,7 +393,6 @@ pub struct S3DocumentSource {
 struct S3DocumentLoaderAgentImpl {
     db_url: String,
     s3_client: S3Client,
-    namespace_mappings: std::collections::HashMap<String, String>, // namespace -> s3_prefix
 }
 
 #[agent_implementation]
@@ -373,11 +407,10 @@ impl S3DocumentLoaderAgent for S3DocumentLoaderAgentImpl {
         Self { 
             db_url, 
             s3_client,
-            namespace_mappings: std::collections::HashMap::new(),
         }
     }
     
-    fn load_documents_from_namespace(&mut self, namespace: &str) -> Result<Vec<Uuid>> {
+    fn load_documents_from_namespace(&mut self, namespace: &str) -> Result<Vec<String>> {
         // Step 1: Map namespace to S3 prefix
         let s3_prefix = self.namespace_to_s3_prefix(namespace)?;
         
@@ -406,7 +439,7 @@ impl S3DocumentLoaderAgent for S3DocumentLoaderAgentImpl {
             
             // Create document
             let document = Document {
-                id: Uuid::new_v4(),
+                id: Uuid::new_v4().to_string(),  // Generate UUID as string
                 title: self.extract_title_from_key(&s3_doc.key),
                 content: String::from_utf8(content)?,
                 metadata: DocumentMetadata {
@@ -417,15 +450,21 @@ impl S3DocumentLoaderAgent for S3DocumentLoaderAgentImpl {
                     tags: vec!["s3".to_string(), "auto-loaded".to_string()],
                     content_type: self.map_content_type(&content_type),
                     size_bytes: s3_doc.size_bytes,
-                    source_metadata: serde_json::json!({
-                        "s3_key": s3_doc.key,
-                        "s3_bucket": self.s3_client.bucket,
-                        "etag": s3_doc.etag,
-                        "last_modified": s3_doc.last_modified,
-                    }),
-                    metadata: serde_json::json!({
-                        "namespace": namespace,
-                    }),
+                    source_metadata: {
+                        let mut metadata = std::collections::HashMap::new();
+                        metadata.insert("s3_key".to_string(), s3_doc.key.clone());
+                        metadata.insert("s3_bucket".to_string(), self.s3_client.bucket.clone());
+                        if let Some(etag) = &s3_doc.etag {
+                            metadata.insert("etag".to_string(), etag.clone());
+                        }
+                        metadata.insert("last_modified".to_string(), s3_doc.last_modified.clone());
+                        metadata
+                    },
+                    metadata: {
+                        let mut metadata = std::collections::HashMap::new();
+                        metadata.insert("namespace".to_string(), namespace.to_string());
+                        metadata
+                    },
                 },
             };
             
@@ -449,27 +488,11 @@ impl S3DocumentLoaderAgent for S3DocumentLoaderAgentImpl {
     }
     
     fn namespace_to_s3_prefix(&self, namespace: &str) -> Result<String> {
-        // Check for explicit mapping
-        if let Some(prefix) = self.namespace_mappings.get(namespace) {
-            return Ok(prefix.clone());
-        }
-        
-        // Default mapping: namespace -> s3_prefix
+        // Simple convention: namespace -> documents/{namespace}/
         // e.g., "legal" -> "documents/legal/"
         // e.g., "technical/reports" -> "documents/technical/reports/"
-        let default_prefix = format!("documents/{}/", namespace.trim_start_matches('/'));
-        Ok(default_prefix)
-    }
-    
-    fn add_namespace_mapping(&mut self, namespace: &str, s3_prefix: &str) -> Result<()> {
-        self.namespace_mappings.insert(namespace.to_string(), s3_prefix.to_string());
-        Ok(())
-    }
-    
-    fn list_namespaces(&self) -> Result<Vec<String>> {
-        let mut namespaces = self.namespace_mappings.keys().cloned().collect::<Vec<_>>();
-        namespaces.sort();
-        Ok(namespaces)
+        let s3_prefix = format!("documents/{}/", namespace.trim_start_matches('/'));
+        Ok(s3_prefix)
     }
 
 // Helper methods for S3DocumentLoaderAgent
@@ -508,7 +531,7 @@ impl S3DocumentLoaderAgentImpl {
         Ok(result.len() > 0 && result[0].get::<_, i64>(0) > 0)
     }
     
-    fn store_document(&self, document: Document) -> Result<Uuid> {
+    fn store_document(&self, document: Document) -> Result<String> {
         let mut connection = DbConnection::open(&self.db_url)?;
         
         let document_id = document.id;
@@ -596,14 +619,14 @@ pub trait EmbeddingGeneratorAgent {
     /// Generate and store embeddings for a specific document
     /// 
     /// # Arguments
-    /// * `document_id` - UUID of the document to process
+    /// * `document_id` - String ID of the document to process
     /// 
     /// # Returns
     /// Number of embeddings generated for the document
-    fn generate_embeddings_for_document(&mut self, document_id: Uuid) -> Result<usize>;
+    fn generate_embeddings_for_document(&mut self, document_id: &str) -> Result<usize>;
     
     /// Get embedding status for a document
-    fn get_embedding_status(&self, document_id: Uuid) -> Result<EmbeddingStatus>;
+    fn get_embedding_status(&self, document_id: &str) -> Result<EmbeddingStatus>;
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -631,7 +654,7 @@ impl EmbeddingGeneratorAgent for EmbeddingGeneratorAgentImpl {
         Self { db_url, embedding_model }
     }
     
-    fn generate_embeddings_for_document(&mut self, document_id: Uuid) -> Result<usize> {
+    fn generate_embeddings_for_document(&mut self, document_id: &str) -> Result<usize> {
         // Connect to database
         let mut connection = DbConnection::open(&self.db_url)
             .map_err(|e| anyhow::anyhow!("Failed to connect to database: {:?}", e))?;
@@ -664,12 +687,12 @@ impl EmbeddingGeneratorAgent for EmbeddingGeneratorAgentImpl {
         Ok(embedding_count)
     }
     
-    fn get_embedding_status(&self, document_id: Uuid) -> Result<EmbeddingStatus> {
+    fn get_embedding_status(&self, document_id: &str) -> Result<EmbeddingStatus> {
         let mut connection = DbConnection::open(&self.db_url)
             .map_err(|e| anyhow::anyhow!("Failed to connect to database: {:?}", e))?;
         
         let query = "SELECT embedding_status, chunk_count FROM document_embeddings WHERE document_id = $1";
-        let result = connection.query(query, &[&document_id.to_string()])?;
+        let result = connection.query(query, &[&document_id])?;
         
         if result.is_empty() {
             Ok(EmbeddingStatus::NotProcessed)
@@ -692,9 +715,9 @@ impl EmbeddingGeneratorAgent for EmbeddingGeneratorAgentImpl {
 
 // Helper methods for EmbeddingGeneratorAgent
 impl EmbeddingGeneratorAgentImpl {
-    fn load_document(&self, connection: &mut DbConnection, document_id: Uuid) -> Result<Document> {
+    fn load_document(&self, connection: &mut DbConnection, document_id: &str) -> Result<Document> {
         let query = "SELECT id, title, content, metadata, created_at, updated_at FROM documents WHERE id = $1";
-        let result = connection.query(query, &[&document_id.to_string()])?;
+        let result = connection.query(query, &[&document_id])?;
         
         if result.is_empty() {
             return Err(anyhow::anyhow!("Document not found: {}", document_id));
@@ -702,7 +725,7 @@ impl EmbeddingGeneratorAgentImpl {
         
         let row = &result[0];
         let document = Document {
-            id: Uuid::parse_str(&row.get::<_, String>(0))?,
+            id: document_id.to_string(),
             title: row.get::<_, String>(1),
             content: row.get::<_, String>(2),
             metadata: serde_json::from_str(&row.get::<_, String>(3))?,
@@ -747,7 +770,7 @@ impl EmbeddingGeneratorAgentImpl {
         }
     }
     
-    fn store_embedding(&self, connection: &mut DbConnection, document_id: Uuid, chunk_index: usize, chunk: &str, embedding: Vector) -> Result<()> {
+    fn store_embedding(&self, connection: &mut DbConnection, document_id: &str, chunk_index: usize, chunk: &str, embedding: Vector) -> Result<()> {
         let query = r#"
             INSERT INTO document_embeddings (document_id, chunk_index, chunk_text, embedding, created_at)
             VALUES ($1, $2, $3, $4, $5)
@@ -758,7 +781,7 @@ impl EmbeddingGeneratorAgentImpl {
         "#;
         
         connection.execute(query, &[
-            &document_id.to_string(),
+            &document_id,
             &(chunk_index as i64),
             chunk,
             &embedding,
@@ -768,7 +791,7 @@ impl EmbeddingGeneratorAgentImpl {
         Ok(())
     }
     
-    fn update_embedding_status(&self, connection: &mut DbConnection, document_id: Uuid, status: EmbeddingStatus) -> Result<()> {
+    fn update_embedding_status(&self, connection: &mut DbConnection, document_id: &str, status: EmbeddingStatus) -> Result<()> {
         let (status_str, chunk_count, error_msg) = match status {
             EmbeddingStatus::NotProcessed => ("not_processed", None, None),
             EmbeddingStatus::InProgress => ("in_progress", None, None),
@@ -787,7 +810,7 @@ impl EmbeddingGeneratorAgentImpl {
         "#;
         
         connection.execute(query, &[
-            &document_id.to_string(),
+            &document_id,
             status_str,
             &chunk_count,
             &error_msg,
@@ -822,19 +845,13 @@ pub trait RagCoordinatorAgent {
     
     /// Retry failed embeddings for a namespace
     fn retry_failed_embeddings(&mut self, namespace: &str) -> Result<RetrySummary>;
-    
-    /// List all available namespaces
-    fn list_namespaces(&self) -> Result<Vec<String>>;
-    
-    /// Add namespace mapping (for custom S3 prefixes)
-    fn add_namespace_mapping(&mut self, namespace: &str, s3_prefix: &str) -> Result<()>;
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ProcessingSummary {
     pub namespace: String,
     pub documents_loaded: usize,
-    pub document_ids: Vec<Uuid>,
+    pub document_ids: Vec<String>,  // String representations of UUIDs
     pub embeddings_generated: usize,
     pub embeddings_failed: usize,
     pub processing_time_ms: u64,
@@ -843,7 +860,7 @@ pub struct ProcessingSummary {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ProcessingStatus {
-    pub s3_prefix: String,
+    pub namespace: String,
     pub total_documents: usize,
     pub loaded_documents: usize,
     pub completed_embeddings: usize,
@@ -884,22 +901,21 @@ impl RagCoordinatorAgent for RagCoordinatorAgentImpl {
         }
     }
     
-    fn process_s3_documents(&mut self, s3_prefix: Option<&str>) -> Result<ProcessingSummary> {
+    fn process_namespace_documents(&mut self, namespace: &str) -> Result<ProcessingSummary> {
         let start_time = std::time::Instant::now();
-        let prefix = s3_prefix.unwrap_or("").to_string();
         
         // Connect to database for tracking
         let mut connection = DbConnection::open(&self.db_url)
             .map_err(|e| anyhow::anyhow!("Failed to connect to database: {:?}", e))?;
         
         // Step 1: Load documents from S3
-        println!("Loading documents from S3 with prefix: '{}'", prefix);
-        let document_ids = self.invoke_document_loader(s3_prefix)?;
+        println!("Loading documents from namespace: '{}'", namespace);
+        let document_ids = self.invoke_document_loader(Some(namespace))?;
         let documents_loaded = document_ids.len();
         
         if documents_loaded == 0 {
             return Ok(ProcessingSummary {
-                s3_prefix: prefix,
+                namespace: namespace.to_string(),
                 documents_loaded: 0,
                 document_ids: vec![],
                 embeddings_generated: 0,
@@ -918,10 +934,10 @@ impl RagCoordinatorAgent for RagCoordinatorAgentImpl {
         let processing_time = start_time.elapsed().as_millis() as u64;
         
         // Step 3: Store processing summary
-        self.store_processing_summary(&mut connection, &prefix, documents_loaded, embeddings_generated, embeddings_failed)?;
+        self.store_processing_summary(&mut connection, namespace, documents_loaded, embeddings_generated, embeddings_failed)?;
         
         Ok(ProcessingSummary {
-            s3_prefix: prefix,
+            namespace: namespace.to_string(),
             documents_loaded,
             document_ids,
             embeddings_generated,
@@ -931,7 +947,7 @@ impl RagCoordinatorAgent for RagCoordinatorAgentImpl {
         })
     }
     
-    fn get_processing_status(&self, s3_prefix: &str) -> Result<ProcessingStatus> {
+    fn get_processing_status(&self, namespace: &str) -> Result<ProcessingStatus> {
         let mut connection = DbConnection::open(&self.db_url)
             .map_err(|e| anyhow::anyhow!("Failed to connect to database: {:?}", e))?;
         
@@ -945,14 +961,14 @@ impl RagCoordinatorAgent for RagCoordinatorAgentImpl {
                 MAX(updated_at) as last_updated
             FROM documents d
             LEFT JOIN document_embeddings e ON d.id = e.document_id
-            WHERE d.metadata->>'s3_key' LIKE $1 || '%'
+            WHERE d.metadata->>'namespace' = $1
         "#;
         
-        let result = connection.query(query, &[&s3_prefix])?;
+        let result = connection.query(query, &[&namespace])?;
         
         if result.is_empty() {
             return Ok(ProcessingStatus {
-                s3_prefix: s3_prefix.to_string(),
+                namespace: namespace.to_string(),
                 total_documents: 0,
                 loaded_documents: 0,
                 completed_embeddings: 0,
@@ -964,7 +980,7 @@ impl RagCoordinatorAgent for RagCoordinatorAgentImpl {
         
         let row = &result[0];
         Ok(ProcessingStatus {
-            s3_prefix: s3_prefix.to_string(),
+            namespace: namespace.to_string(),
             total_documents: row.get::<_, i64>(0) as usize,
             loaded_documents: row.get::<_, i64>(1) as usize,
             completed_embeddings: row.get::<_, i64>(2) as usize,
@@ -974,11 +990,9 @@ impl RagCoordinatorAgent for RagCoordinatorAgentImpl {
         })
     }
     
-    fn retry_failed_embeddings(&mut self, s3_prefix: Option<&str>) -> Result<RetrySummary> {
-        let prefix = s3_prefix.unwrap_or("").to_string();
-        
+    fn retry_failed_embeddings(&mut self, namespace: &str) -> Result<RetrySummary> {
         // Find documents with failed embeddings
-        let failed_document_ids = self.get_failed_document_ids(&prefix)?;
+        let failed_document_ids = self.get_failed_document_ids(namespace)?;
         let attempted_retries = failed_document_ids.len();
         
         if attempted_retries == 0 {
@@ -1017,25 +1031,25 @@ impl RagCoordinatorAgent for RagCoordinatorAgentImpl {
 
 // Helper methods for RagCoordinatorAgent
 impl RagCoordinatorAgentImpl {
-    fn invoke_document_loader(&mut self, s3_prefix: Option<&str>) -> Result<Vec<Uuid>> {
+    fn invoke_document_loader(&mut self, namespace: Option<&str>) -> Result<Vec<String>> {
         // In a real implementation, this would use Golem RPC to call the DocumentLoaderAgent
         // For now, we'll simulate the call
         
         // Simulate RPC call to DocumentLoaderAgent
-        println!("Invoking DocumentLoaderAgent with prefix: {:?}", s3_prefix);
+        println!("Invoking DocumentLoaderAgent with namespace: {:?}", namespace);
         
-        // This would be: let document_ids = document_loader_agent.load_documents_from_s3(s3_prefix)?;
+        // This would be: let document_ids = document_loader_agent.load_documents_from_namespace(namespace)?;
         // For simulation, we'll return mock IDs
         let mock_document_ids = vec![
-            Uuid::new_v4(),
-            Uuid::new_v4(),
-            Uuid::new_v4(),
+            Uuid::new_v4().to_string(),
+            Uuid::new_v4().to_string(),
+            Uuid::new_v4().to_string(),
         ];
         
         Ok(mock_document_ids)
     }
     
-    fn generate_embeddings_for_documents(&self, document_ids: &[Uuid]) -> Result<(usize, usize)> {
+    fn generate_embeddings_for_documents(&self, document_ids: &[String]) -> Result<(usize, usize)> {
         let mut embeddings_generated = 0;
         let mut embeddings_failed = 0;
         
@@ -1055,7 +1069,7 @@ impl RagCoordinatorAgentImpl {
         Ok((embeddings_generated, embeddings_failed))
     }
     
-    fn invoke_embedding_generator(&self, document_id: Uuid) -> Result<usize> {
+    fn invoke_embedding_generator(&self, document_id: &str) -> Result<usize> {
         // In a real implementation, this would use Golem RPC to call the EmbeddingGeneratorAgent
         println!("Invoking EmbeddingGeneratorAgent for document: {}", document_id);
         
@@ -1066,7 +1080,7 @@ impl RagCoordinatorAgentImpl {
         Ok(mock_embedding_count)
     }
     
-    fn get_failed_document_ids(&self, s3_prefix: &str) -> Result<Vec<Uuid>> {
+    fn get_failed_document_ids(&self, namespace: &str) -> Result<Vec<String>> {
         let mut connection = DbConnection::open(&self.db_url)
             .map_err(|e| anyhow::anyhow!("Failed to connect to database: {:?}", e))?;
         
@@ -1074,29 +1088,29 @@ impl RagCoordinatorAgentImpl {
             SELECT d.id 
             FROM documents d
             JOIN document_embeddings e ON d.id = e.document_id
-            WHERE d.metadata->>'s3_key' LIKE $1 || '%'
+            WHERE d.metadata->>'namespace' = $1
             AND e.embedding_status = 'failed'
         "#;
         
-        let result = connection.query(query, &[&s3_prefix])?;
+        let result = connection.query(query, &[&namespace])?;
         
         let mut failed_ids = Vec::new();
         for row in result {
             let id_str = row.get::<_, String>(0);
-            failed_ids.push(Uuid::parse_str(&id_str)?);
+            failed_ids.push(id_str);
         }
         
         Ok(failed_ids)
     }
     
-    fn store_processing_summary(&self, connection: &mut DbConnection, s3_prefix: &str, documents_loaded: usize, embeddings_generated: usize, embeddings_failed: usize) -> Result<()> {
+    fn store_processing_summary(&self, connection: &mut DbConnection, namespace: &str, documents_loaded: usize, embeddings_generated: usize, embeddings_failed: usize) -> Result<()> {
         let query = r#"
-            INSERT INTO processing_summaries (s3_prefix, documents_loaded, embeddings_generated, embeddings_failed, created_at)
+            INSERT INTO processing_summaries (namespace, documents_loaded, embeddings_generated, embeddings_failed, created_at)
             VALUES ($1, $2, $3, $4, $5)
         "#;
         
         connection.execute(query, &[
-            s3_prefix,
+            namespace,
             &(documents_loaded as i64),
             &(embeddings_generated as i64),
             &(embeddings_failed as i64),
@@ -1113,22 +1127,23 @@ impl RagCoordinatorAgentImpl {
 ```rust
 // Simple coordination - one call to handle everything
 let coordinator = RagCoordinatorAgent::new();
-let summary = coordinator.process_s3_documents(Some("documents/"))?;
+let summary = coordinator.process_namespace_documents("legal")?;
 
 println!("Processing Summary:");
-println!("  S3 Prefix: {}", summary.s3_prefix);
+println!("  Namespace: {}", summary.namespace);
 println!("  Documents Loaded: {}", summary.documents_loaded);
 println!("  Embeddings Generated: {}", summary.embeddings_generated);
 println!("  Embeddings Failed: {}", summary.embeddings_failed);
 println!("  Processing Time: {}ms", summary.processing_time_ms);
 
 // Check processing status
-let status = coordinator.get_processing_status("documents/");
+let status = coordinator.get_processing_status("legal");
 println!("Status: {:?}", status);
 
 // Retry failed embeddings if any
+let retry_summary = coordinator.retry_failed_embeddings("legal");
 if summary.embeddings_failed > 0 {
-    let retry_summary = coordinator.retry_failed_embeddings(Some("documents/"));
+    let retry_summary = coordinator.retry_failed_embeddings("legal");
     println!("Retry Summary: {:?}", retry_summary);
 }
 ```
@@ -1237,19 +1252,19 @@ pub trait DocumentAgent {
     fn new() -> Self;
     
     /// Get document content by ID
-    fn get_document(&self, document_id: Uuid) -> Result<Option<Document>>;
+    fn get_document(&self, document_id: &str) -> Result<Option<Document>>;
     
     /// Get document metadata without content
-    fn get_document_metadata(&self, document_id: Uuid) -> Result<Option<DocumentMetadata>>;
+    fn get_document_metadata(&self, document_id: &str) -> Result<Option<DocumentMetadata>>;
     
     /// List documents with optional filters
     fn list_documents(&self, filters: Option<DocumentFilters>, limit: Option<usize>) -> Result<Vec<Document>>;
     
     /// Get document chunks for a specific document
-    fn get_document_chunks(&self, document_id: Uuid) -> Result<Vec<DocumentChunk>>;
+    fn get_document_chunks(&self, document_id: &str) -> Result<Vec<DocumentChunk>>;
     
     /// Check if document exists
-    fn document_exists(&self, document_id: Uuid) -> Result<bool>;
+    fn document_exists(&self, document_id: &str) -> Result<bool>;
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -1257,15 +1272,15 @@ pub struct DocumentFilters {
     pub content_types: Vec<String>,        // e.g., ["text/plain", "application/pdf"]
     pub tags: Vec<String>,                 // e.g., ["s3", "auto-loaded"]
     pub date_range: Option<DateRange>,      // Filter by creation/update date
-    pub s3_prefix: Option<String>,          // Filter by S3 prefix
+    pub namespace: Option<String>,         // Filter by namespace
     pub min_size_bytes: Option<u64>,       // Minimum document size
     pub max_size_bytes: Option<u64>,       // Maximum document size
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct DocumentChunk {
-    pub chunk_id: Uuid,
-    pub document_id: Uuid,
+    pub chunk_id: String,        // String representation of UUID
+    pub document_id: String,     // String representation of UUID
     pub chunk_index: usize,
     pub chunk_text: String,
     pub start_pos: usize,
@@ -1286,19 +1301,19 @@ impl DocumentAgent for DocumentAgentImpl {
         Self { db_url }
     }
     
-    fn get_document(&self, document_id: Uuid) -> Result<Option<Document>> {
+    fn get_document(&self, document_id: &str) -> Result<Option<Document>> {
         let mut connection = DbConnection::open(&self.db_url)
             .map_err(|e| anyhow::anyhow!("Failed to connect to database: {:?}", e))?;
         
         let query = "SELECT id, title, content, metadata, created_at, updated_at FROM documents WHERE id = $1";
-        let result = connection.query(query, &[&document_id.to_string()])?;
+        let result = connection.query(query, &[&document_id])?;
         
         if result.is_empty() {
             Ok(None)
         } else {
             let row = &result[0];
             let document = Document {
-                id: Uuid::parse_str(&row.get::<_, String>(0))?,
+                id: document_id.to_string(),
                 title: row.get::<_, String>(1),
                 content: row.get::<_, String>(2),
                 metadata: serde_json::from_str(&row.get::<_, String>(3))?,
@@ -1307,7 +1322,7 @@ impl DocumentAgent for DocumentAgentImpl {
         }
     }
     
-    fn get_document_metadata(&self, document_id: Uuid) -> Result<Option<DocumentMetadata>> {
+    fn get_document_metadata(&self, document_id: &str) -> Result<Option<DocumentMetadata>> {
         if let Some(document) = self.get_document(document_id)? {
             Ok(Some(document.metadata))
         } else {
@@ -1338,7 +1353,7 @@ impl DocumentAgent for DocumentAgentImpl {
         Ok(documents)
     }
     
-    fn get_document_chunks(&self, document_id: Uuid) -> Result<Vec<DocumentChunk>> {
+    fn get_document_chunks(&self, document_id: &str) -> Result<Vec<DocumentChunk>> {
         let mut connection = DbConnection::open(&self.db_url)
             .map_err(|e| anyhow::anyhow!("Failed to connect to database: {:?}", e))?;
         
@@ -1368,12 +1383,12 @@ impl DocumentAgent for DocumentAgentImpl {
         Ok(chunks)
     }
     
-    fn document_exists(&self, document_id: Uuid) -> Result<bool> {
+    fn document_exists(&self, document_id: &str) -> Result<bool> {
         let mut connection = DbConnection::open(&self.db_url)
             .map_err(|e| anyhow::anyhow!("Failed to connect to database: {:?}", e))?;
         
         let query = "SELECT COUNT(*) FROM documents WHERE id = $1";
-        let result = connection.query(query, &[&document_id.to_string()])?;
+        let result = connection.query(query, &[&document_id])?;
         
         Ok(result.len() > 0 && result[0].get::<_, i64>(0) > 0)
     }
@@ -1419,10 +1434,10 @@ impl DocumentAgentImpl {
                 param_index += 1;
             }
             
-            // Add S3 prefix filter
-            if let Some(s3_prefix) = &filters.s3_prefix {
-                query_conditions.push(format!("metadata->>'s3_key' LIKE ${}", param_index));
-                params.push(format!("{}%", s3_prefix));
+            // Add namespace filter
+            if let Some(namespace) = &filters.namespace {
+                query_conditions.push(format!("metadata->>'namespace' = ${}", param_index));
+                params.push(namespace.clone());
                 param_index += 1;
             }
             
@@ -1464,7 +1479,7 @@ impl Default for DocumentFilters {
             content_types: vec![],
             tags: vec![],
             date_range: None,
-            s3_prefix: None,
+            namespace: None,
             min_size_bytes: None,
             max_size_bytes: None,
         }
@@ -1509,12 +1524,12 @@ pub trait SearchAgent {
     fn hybrid_search(&self, query: &str, keyword_weight: Option<f32>, semantic_weight: Option<f32>, filters: Option<SearchFilters>, limit: Option<usize>) -> Result<Vec<HybridSearchResult>>;
     
     /// Get similar documents to a specific document
-    fn find_similar_documents(&self, document_id: Uuid, limit: Option<usize>) -> Result<Vec<SearchResult>>;
+    fn find_similar_documents(&self, document_id: &str, limit: Option<usize>) -> Result<Vec<SearchResult>>;
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SearchResult {
-    pub document_id: Uuid,
+    pub document_id: String,       // String representation of UUID
     pub chunk_index: usize,
     pub chunk_text: String,
     pub title: String,
@@ -1525,7 +1540,7 @@ pub struct SearchResult {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct HybridSearchResult {
-    pub document_id: Uuid,
+    pub document_id: String,       // String representation of UUID
     pub chunk_index: usize,
     pub chunk_text: String,
     pub title: String,
@@ -1549,7 +1564,7 @@ pub struct SearchFilters {
     pub content_types: Vec<String>,        // e.g., ["text/plain", "application/pdf"]
     pub tags: Vec<String>,                 // e.g., ["s3", "auto-loaded"]
     pub date_range: Option<DateRange>,      // Filter by creation/update date
-    pub s3_prefix: Option<String>,          // Filter by S3 prefix
+    pub namespace: Option<String>,         // Filter by namespace
     pub min_size_bytes: Option<u64>,       // Minimum document size
     pub max_size_bytes: Option<u64>,       // Maximum document size
 }
@@ -1614,7 +1629,7 @@ impl SearchAgent for SearchAgentImpl {
         Ok(search_results)
     }
     
-    fn find_similar_documents(&self, document_id: Uuid, limit: Option<usize>) -> Result<Vec<SearchResult>> {
+    fn find_similar_documents(&self, document_id: &str, limit: Option<usize>) -> Result<Vec<SearchResult>> {
         let limit = limit.unwrap_or(5);
         
         // Get the document's embedding
@@ -1622,7 +1637,7 @@ impl SearchAgent for SearchAgentImpl {
             .map_err(|e| anyhow::anyhow!("Failed to connect to database: {:?}", e))?;
         
         let query = "SELECT embedding FROM document_embeddings WHERE document_id = $1 AND chunk_index = 0 LIMIT 1";
-        let result = connection.query(query, &[&document_id.to_string()])?;
+        let result = connection.query(query, &[&document_id])?;
         
         if result.is_empty() {
             return Ok(vec![]);
@@ -1772,7 +1787,7 @@ impl SearchAgentImpl {
         let mut keyword_results = Vec::new();
         for row in result {
             let keyword_score = row.get::<_, f32>("keyword_score");
-            let document_id = Uuid::parse_str(&row.get::<_, String>("document_id"))?;
+            let document_id = row.get::<_, String>("document_id");
             let chunk_index = row.get::<_, i64>("chunk_index") as usize;
             
             keyword_results.push(HybridSearchResult {
@@ -1826,9 +1841,9 @@ impl SearchAgentImpl {
                 }
             }
             
-            if let Some(s3_prefix) = &filters.s3_prefix {
-                query_conditions.push(format!("d.metadata->>'s3_key' LIKE ${}", param_index));
-                params.push(format!("{}%", s3_prefix));
+            if let Some(namespace) = &filters.namespace {
+                query_conditions.push(format!("d.metadata->>'namespace' = ${}", param_index));
+                params.push(namespace.clone());
                 param_index += 1;
             }
         }
@@ -1894,10 +1909,10 @@ impl SearchAgentImpl {
             param_index += 1;
         }
         
-        // Add S3 prefix filter
-        if let Some(s3_prefix) = &filters.s3_prefix {
-            query_conditions.push(format!("d.metadata->>'s3_key' LIKE ${}", param_index));
-            params.push(format!("{}%", s3_prefix));
+        // Add namespace filter
+        if let Some(namespace) = &filters.namespace {
+            query_conditions.push(format!("d.metadata->>'namespace' = ${}", param_index));
+            params.push(namespace.clone());
             param_index += 1;
         }
         
@@ -1941,7 +1956,7 @@ impl SearchAgentImpl {
     }
     
     fn create_search_result_from_row(&self, row: golem_rust::bindings::golem::rdbms::types::Row, query_embedding: &Vector) -> Result<SearchResult> {
-        let document_id = Uuid::parse_str(&row.get::<_, String>("id"))?;
+        let document_id = row.get::<_, String>("id");
         let chunk_index = row.get::<_, i64>("chunk_index") as usize;
         let chunk_text = row.get::<_, String>("chunk_text");
         let title = row.get::<_, String>("title");
@@ -1983,7 +1998,7 @@ impl Default for SearchFilters {
             content_types: vec![],
             tags: vec![],
             date_range: None,
-            s3_prefix: None,
+            namespace: None,
             min_size_bytes: None,
             max_size_bytes: None,
         }
@@ -2013,7 +2028,7 @@ for (i, result) in results.iter().enumerate() {
 let mut filters = SearchFilters::default();
 filters.content_types = vec!["text/plain".to_string(), "text/markdown".to_string()];
 filters.tags = vec!["s3".to_string(), "auto-loaded".to_string()];
-filters.s3_prefix = Some("documents/".to_string());
+filters.namespace = Some("legal".to_string());
 
 let filtered_results = search_agent.search_with_filters(
     "database optimization", 
