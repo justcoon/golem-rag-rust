@@ -8,6 +8,7 @@ path = "src/lib.rs"
 
 [dependencies]
 golem-rust = { workspace = true }
+golem-rust-macro = { workspace = true }
 golem-wasi-http = { workspace = true }
 log = { workspace = true }
 serde = { workspace = true }

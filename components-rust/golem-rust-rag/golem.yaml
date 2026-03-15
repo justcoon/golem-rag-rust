@@ -54,31 +54,31 @@ httpApi:
               { status: 200, body: { results: results } }
 
         # Document management endpoints
-        - method: GET
-          path: /documents/{document_id}
-          binding:
-            type: default
-            componentName: golem-rust:rag
-            response: |
-              let document_id: string = request.path.document_id;
-              let agent = document-agent();
-              let document = agent.get-document(document_id);
-              match document {
-                Some(doc) => { status: 200, body: { document: doc } },
-                None => { status: 404, body: { error: "Document not found" } }
-              }
-
-        - method: GET
-          path: /documents
-          binding:
-            type: default
-            componentName: golem-rust:rag
-            response: |
-              let filters = request.query.filters;
-              let limit: option<u64> = request.query.limit;
-              let agent = document-agent();
-              let documents = agent.list-documents(filters, limit);
-              { status: 200, body: { documents: documents } }
+#        - method: GET
+#          path: /documents/{document_id}
+#          binding:
+#            type: default
+#            componentName: golem-rust:rag
+#            response: |
+#              let document_id: string = request.path.document_id;
+#              let agent = document-agent();
+#              let document = agent.get-document(document_id);
+#              match document {
+#                Some(doc) => { status: 200, body: { document: doc } },
+#                None => { status: 404, body: { error: "Document not found" } }
+#              }
+#
+#        - method: GET
+#          path: /documents
+#          binding:
+#            type: default
+#            componentName: golem-rust:rag
+#            response: |
+#              let filters = request.query.filters;
+#              let limit: option<u64> = request.query.limit;
+#              let agent = document-agent();
+#              let documents = agent.list-documents(filters, limit);
+#              { status: 200, body: { documents: documents } }
 
         # S3 document loading endpoints
         - method: POST

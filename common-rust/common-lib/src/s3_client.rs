@@ -128,13 +128,15 @@ impl S3Client {
         };
 
         let timestamp = Utc::now().format("%Y%m%dT%H%M%SZ").to_string();
-        let authorization = self.create_s3_auth_header("GET", path, &timestamp, "", &endpoint);
+        let payload_hash = self.sha256_hex("".as_bytes());
+        let authorization = self.create_s3_auth_header("GET", path, &timestamp, &payload_hash, &endpoint);
 
         let response = self
             .client
             .request(Method::GET, &url)
             .header("Authorization", authorization)
             .header("X-Amz-Date", timestamp)
+            .header("X-Amz-Content-Sha256", payload_hash)
             .send()
             .map_err(|e| S3Error::NetworkError(format!("Failed to send request: {:?}", e)))?;
 
@@ -157,7 +159,8 @@ impl S3Client {
         let path = format!("/{}", key);
 
         let timestamp = Utc::now().format("%Y%m%dT%H%M%SZ").to_string();
-        let authorization = self.create_s3_auth_header("GET", &path, &timestamp, "", &endpoint);
+        let payload_hash = self.sha256_hex("".as_bytes());
+        let authorization = self.create_s3_auth_header("GET", &path, &timestamp, &payload_hash, &endpoint);
 
         let url = format!("{}{}", endpoint, path);
 
@@ -166,6 +169,7 @@ impl S3Client {
             .request(Method::GET, &url)
             .header("Authorization", authorization)
             .header("X-Amz-Date", timestamp)
+            .header("X-Amz-Content-Sha256", payload_hash)
             .send()
             .map_err(|e| S3Error::NetworkError(format!("Failed to send request: {:?}", e)))?;
 
@@ -189,7 +193,8 @@ impl S3Client {
         let path = format!("/{}", key);
 
         let timestamp = Utc::now().format("%Y%m%dT%H%M%SZ").to_string();
-        let authorization = self.create_s3_auth_header("HEAD", &path, &timestamp, "", &endpoint);
+        let payload_hash = self.sha256_hex("".as_bytes());
+        let authorization = self.create_s3_auth_header("HEAD", &path, &timestamp, &payload_hash, &endpoint);
 
         let url = format!("{}{}", endpoint, path);
 
@@ -198,6 +203,7 @@ impl S3Client {
             .request(Method::HEAD, &url)
             .header("Authorization", authorization)
             .header("X-Amz-Date", timestamp)
+            .header("X-Amz-Content-Sha256", payload_hash)
             .send()
             .map_err(|e| S3Error::NetworkError(format!("Failed to send request: {:?}", e)))?;
 
@@ -251,8 +257,8 @@ impl S3Client {
         let date = &timestamp[0..8];
         let host = endpoint.replace("https://", "").replace("http://", "");
 
-        let canonical_headers = format!("host:{}\nx-amz-date:{}", host, timestamp);
-        let signed_headers = "host;x-amz-date";
+        let canonical_headers = format!("host:{}\nx-amz-content-sha256:{}\nx-amz-date:{}", host, payload_hash, timestamp);
+        let signed_headers = "host;x-amz-content-sha256;x-amz-date";
 
         let canonical_request = format!(
             "{}\n{}\n\n{}\n\n{}\n{}",

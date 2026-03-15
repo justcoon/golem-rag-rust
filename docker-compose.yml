@@ -32,6 +32,12 @@ services:
       RUSTFS_BUCKET: ${RUSTFS_BUCKET}
       RUSTFS_ADDR: ${RUSTFS_ADDR}
       RUSTFS_LOG_LEVEL: ${RUSTFS_LOG_LEVEL}
+      # Try different variable names for RustFS
+      AWS_ACCESS_KEY_ID: ${RUSTFS_ACCESS_KEY}
+      AWS_SECRET_ACCESS_KEY: ${RUSTFS_SECRET_KEY}
+      AWS_DEFAULT_REGION: ${RUSTFS_REGION}
+      ACCESS_KEY: ${RUSTFS_ACCESS_KEY}
+      SECRET_KEY: ${RUSTFS_SECRET_KEY}
     ports:
       - "${RUSTFS_PORT}:9000"  # S3 API port
     volumes:

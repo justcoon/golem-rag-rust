@@ -8,9 +8,11 @@ lto = true
 
 [workspace.dependencies]
 
-golem-rust = { version = "1.10.4", features = [
+golem-rust = { version = "=1.10.4", features = [
     "export_golem_agentic",
 ] }
+
+golem-rust-macro = { version = "=1.10.4" }
 
 # Advanced HTTP client, alternative of wstd::http
 golem-wasi-http = { version = "0.1.0", features = ["json"] }
