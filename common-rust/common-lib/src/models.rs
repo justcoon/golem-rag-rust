@@ -98,7 +98,7 @@ pub struct SearchQuery {
     pub similarity_threshold: f32,
 }
 
-#[derive(Clone, Debug, Schema, Serialize, Deserialize)]
+#[derive(Clone, Debug, Schema, Serialize, Deserialize, Default)]
 pub struct SearchFilters {
     pub tags: Vec<String>,
     pub sources: Vec<String>,
@@ -110,17 +110,6 @@ pub struct SearchFilters {
 pub struct DateRange {
     pub start: String,
     pub end: String,
-}
-
-impl Default for SearchFilters {
-    fn default() -> Self {
-        Self {
-            tags: vec![],
-            sources: vec![],
-            content_types: vec![],
-            date_range: None,
-        }
-    }
 }
 
 #[derive(Clone, Debug, Schema, Serialize, Deserialize)]

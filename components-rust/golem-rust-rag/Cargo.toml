@@ -22,6 +22,7 @@ wstd = { workspace = true }
 uuid = { workspace = true, features = ["v4"] }
 anyhow = { workspace = true }
 try_match = { workspace = true }
+futures = "0.3"
 
 # S3 Client dependencies  
 hmac = { workspace = true }
