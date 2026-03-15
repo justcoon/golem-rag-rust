@@ -154,7 +154,7 @@ impl DocumentAgent for DocumentAgentImpl {
         };
 
         db_helper
-            .document_exists_by_s3_key(&document_id)
+            .document_exists(&document_id)
             .map_err(|e| format!("Failed to check document existence: {:?}", e))
     }
 }

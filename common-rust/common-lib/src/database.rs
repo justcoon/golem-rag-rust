@@ -85,6 +85,16 @@ impl DatabaseHelper {
         }))
     }
 
+    pub fn document_exists(&mut self, document_id: &str) -> Result<bool> {
+        let query = "SELECT COUNT(*) FROM documents WHERE id = $1";
+        let result = self.connection.query(query, vec![PostgresDbValue::Text(document_id.to_string())])?;
+        
+        Ok(!result.rows.is_empty() && match &result.rows[0].values[0] {
+            PostgresDbValue::Int8(count) => *count > 0,
+            _ => false,
+        })
+    }
+
     pub fn update_embedding_status(&mut self, document_id: &str, status: &EmbeddingStatus) -> Result<()> {
         let status_str = match status {
             EmbeddingStatus::NotProcessed => "not_processed".to_string(),
