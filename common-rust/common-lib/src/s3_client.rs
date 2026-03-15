@@ -1,9 +1,9 @@
 use chrono::Utc;
+use golem_rust::Schema;
 use golem_wasi_http::{Client, Method};
 use hmac::{Hmac, Mac};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use golem_rust::Schema;
 
 // S3 Document Source Types
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -102,19 +102,32 @@ impl S3Client {
     }
 
     pub fn list_objects(&self, bucket: &str, prefix: Option<&str>) -> S3Result<S3ListResponse> {
-        let endpoint = format!("{}/{}", self.endpoint_url, bucket);
+        // For custom endpoints (MinIO/RustFS), use path-style URL
+        let endpoint = if self.endpoint_url.contains("localhost") || !self.endpoint_url.contains("amazonaws.com") {
+            format!("{}/{}", self.endpoint_url, bucket)
+        } else {
+            format!("{}.{}.amazonaws.com", bucket, self.region)
+        };
         let path = "/";
 
         let mut query_params = Vec::new();
+        // Match working AWS CLI format exactly: delimiter=%2F&encoding-type=url&list-type=2&prefix=
+        query_params.push(("delimiter", "/"));
+        query_params.push(("encoding-type", "url"));
+        query_params.push(("list-type", "2"));
+        // Always include prefix parameter (empty string for empty prefix)
         if let Some(p) = prefix {
             query_params.push(("prefix", p));
+        } else {
+            query_params.push(("prefix", ""));
         }
-        query_params.push(("list-type", "2"));
 
         let query_string = if query_params.is_empty() {
             String::new()
         } else {
-            query_params
+            let mut sorted_params = query_params.clone();
+            sorted_params.sort_by(|a, b| a.0.cmp(b.0));
+            sorted_params
                 .iter()
                 .map(|(k, v)| format!("{}={}", k, self.url_encode(v)))
                 .collect::<Vec<_>>()
@@ -129,7 +142,35 @@ impl S3Client {
 
         let timestamp = Utc::now().format("%Y%m%dT%H%M%SZ").to_string();
         let payload_hash = self.sha256_hex("".as_bytes());
-        let authorization = self.create_s3_auth_header("GET", path, &timestamp, &payload_hash, &endpoint);
+
+        // Include query string in the path for signature calculation
+        // For custom endpoints, include bucket in path; for AWS, use just the path
+        let path_for_signature = if query_string.is_empty() {
+            if self.endpoint_url.contains("localhost") || !self.endpoint_url.contains("amazonaws.com") {
+                format!("/{}{}", bucket, path)
+            } else {
+                path.to_string()
+            }
+        } else {
+            if self.endpoint_url.contains("localhost") || !self.endpoint_url.contains("amazonaws.com") {
+                format!("/{}{}?{}", bucket, path, query_string)
+            } else {
+                format!("{}?{}", path, query_string)
+            }
+        };
+
+        let authorization = self.create_s3_auth_header(
+            "GET",
+            &path_for_signature,
+            &timestamp,
+            &payload_hash,
+            &endpoint,
+        );
+
+        log::debug!("S3 Request - URL: {}, Method: GET", url);
+        log::debug!("S3 Request - Path for signature: {}", path_for_signature);
+        log::debug!("S3 Request - Timestamp: {}", timestamp);
+        log::debug!("S3 Request - Authorization: {}", authorization);
 
         let response = self
             .client
@@ -155,12 +196,18 @@ impl S3Client {
     }
 
     pub fn get_object(&self, bucket: &str, key: &str) -> S3Result<Vec<u8>> {
-        let endpoint = format!("{}/{}", self.endpoint_url, bucket);
+        // For custom endpoints (MinIO/RustFS), use path-style URL
+        let endpoint = if self.endpoint_url.contains("localhost") || !self.endpoint_url.contains("amazonaws.com") {
+            format!("{}/{}", self.endpoint_url, bucket)
+        } else {
+            format!("{}.{}.amazonaws.com", bucket, self.region)
+        };
         let path = format!("/{}", key);
 
         let timestamp = Utc::now().format("%Y%m%dT%H%M%SZ").to_string();
         let payload_hash = self.sha256_hex("".as_bytes());
-        let authorization = self.create_s3_auth_header("GET", &path, &timestamp, &payload_hash, &endpoint);
+        let authorization =
+            self.create_s3_auth_header("GET", &path, &timestamp, &payload_hash, &endpoint);
 
         let url = format!("{}{}", endpoint, path);
 
@@ -189,12 +236,18 @@ impl S3Client {
     }
 
     pub fn get_object_metadata(&self, bucket: &str, key: &str) -> S3Result<S3ObjectMetadata> {
-        let endpoint = format!("{}/{}", self.endpoint_url, bucket);
+        // For custom endpoints (MinIO/RustFS), use path-style URL
+        let endpoint = if self.endpoint_url.contains("localhost") || !self.endpoint_url.contains("amazonaws.com") {
+            format!("{}/{}", self.endpoint_url, bucket)
+        } else {
+            format!("{}.{}.amazonaws.com", bucket, self.region)
+        };
         let path = format!("/{}", key);
 
         let timestamp = Utc::now().format("%Y%m%dT%H%M%SZ").to_string();
         let payload_hash = self.sha256_hex("".as_bytes());
-        let authorization = self.create_s3_auth_header("HEAD", &path, &timestamp, &payload_hash, &endpoint);
+        let authorization =
+            self.create_s3_auth_header("HEAD", &path, &timestamp, &payload_hash, &endpoint);
 
         let url = format!("{}{}", endpoint, path);
 
@@ -255,15 +308,37 @@ impl S3Client {
         endpoint: &str,
     ) -> String {
         let date = &timestamp[0..8];
-        let host = endpoint.replace("https://", "").replace("http://", "");
+        
+        // Extract host from endpoint (exclude bucket name for custom endpoints)
+        let host = if self.endpoint_url.contains("localhost") || !self.endpoint_url.contains("amazonaws.com") {
+            // For custom endpoints, host is just the base URL
+            self.endpoint_url.replace("https://", "").replace("http://", "")
+        } else {
+            // For AWS, use the endpoint as-is
+            endpoint.replace("https://", "").replace("http://", "")
+        };
+
+        // Split path and query string for canonical request
+        let (canonical_path, canonical_query_string) = if let Some(query_pos) = path.find('?') {
+            (&path[..query_pos], &path[query_pos + 1..])
+        } else {
+            (path, "")
+        };
 
         let canonical_headers = format!("host:{}\nx-amz-content-sha256:{}\nx-amz-date:{}", host, payload_hash, timestamp);
         let signed_headers = "host;x-amz-content-sha256;x-amz-date";
 
         let canonical_request = format!(
-            "{}\n{}\n\n{}\n\n{}\n{}",
-            method, path, canonical_headers, signed_headers, payload_hash
+            "{}\n{}\n{}\n{}\n{}\n{}",
+            method,
+            canonical_path,
+            canonical_query_string,
+            canonical_headers,
+            signed_headers,
+            payload_hash
         );
+
+        log::debug!("S3 Canonical Request:\n{}", canonical_request);
 
         let canonical_request_hash = self.sha256_hex(canonical_request.as_bytes());
 
@@ -272,6 +347,8 @@ impl S3Client {
             "AWS4-HMAC-SHA256\n{}\n{}\n{}",
             timestamp, credential_scope, canonical_request_hash
         );
+
+        log::debug!("S3 String to Sign:\n{}", string_to_sign);
 
         let signature = self.calculate_s3_signature(&string_to_sign, date);
 
@@ -282,15 +359,16 @@ impl S3Client {
     }
 
     fn calculate_s3_signature(&self, string_to_sign: &str, date: &str) -> String {
-        let date_key = hmac_sha256(
+        // AWS CLI HMAC key derivation - exact match
+        let k_date = hmac_sha256(
             format!("AWS4{}", self.secret_access_key).as_bytes(),
             date.as_bytes(),
         );
-        let date_region_key = hmac_sha256(&date_key, self.region.as_bytes());
-        let date_region_service_key = hmac_sha256(&date_region_key, b"s3");
-        let signing_key = hmac_sha256(&date_region_service_key, b"aws4_request");
+        let k_region = hmac_sha256(&k_date, self.region.as_bytes());
+        let k_service = hmac_sha256(&k_region, b"s3");
+        let k_signing = hmac_sha256(&k_service, b"aws4_request");
 
-        let signature = hmac_sha256(&signing_key, string_to_sign.as_bytes());
+        let signature = hmac_sha256(&k_signing, string_to_sign.as_bytes());
         hex::encode(signature)
     }
 

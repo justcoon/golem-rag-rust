@@ -190,7 +190,13 @@ impl S3DocumentLoaderAgentImpl {
         // Simple convention: namespace -> documents/{namespace}/
         // e.g., "legal" -> "documents/legal/"
         // e.g., "technical/reports" -> "documents/technical/reports/"
-        let s3_prefix = format!("documents/{}/", namespace.trim_start_matches('/'));
+        // For empty namespace, use empty prefix to match working AWS CLI signature
+        let trimmed_namespace = namespace.trim_start_matches('/');
+        let s3_prefix = if trimmed_namespace.is_empty() {
+            "".to_string()  // Empty prefix for empty namespace (matches working signature)
+        } else {
+            format!("documents/{}/", trimmed_namespace)
+        };
         Ok(s3_prefix)
     }
 

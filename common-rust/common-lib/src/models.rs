@@ -1,5 +1,5 @@
-use serde::{Deserialize, Serialize};
 use golem_rust::Schema;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 #[derive(Clone, Debug, Schema, Serialize, Deserialize)]
@@ -146,7 +146,7 @@ pub type HybridSearchResult = SearchResult;
 
 #[derive(Clone, Debug, Schema, Serialize, Deserialize)]
 pub enum MatchType {
-    SemanticOnly,     // Only semantic match
-    KeywordOnly,      // Only keyword match
-    BothMatch,        // Both semantic and keyword match
+    SemanticOnly, // Only semantic match
+    KeywordOnly,  // Only keyword match
+    BothMatch,    // Both semantic and keyword match
 }
