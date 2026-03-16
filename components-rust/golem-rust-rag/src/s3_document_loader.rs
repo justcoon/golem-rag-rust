@@ -24,7 +24,7 @@ pub trait S3DocumentLoaderAgent {
 }
 
 struct S3DocumentLoaderAgentImpl {
-    db_url: String,
+    db_config: PostgresDbConfig,
     s3_client: S3Client,
     bucket: String,
 }
@@ -32,7 +32,8 @@ struct S3DocumentLoaderAgentImpl {
 #[agent_implementation]
 impl S3DocumentLoaderAgent for S3DocumentLoaderAgentImpl {
     fn new() -> Self {
-        let db_url = std::env::var("DB_URL").expect("DB_URL environment variable must be set");
+        let db_config =
+            PostgresDbConfig::from_env().expect("Failed to load PostgresDbConfig from environment");
 
         let access_key_id = std::env::var("AWS_ACCESS_KEY_ID")
             .expect("AWS_ACCESS_KEY_ID environment variable must be set");
@@ -47,7 +48,7 @@ impl S3DocumentLoaderAgent for S3DocumentLoaderAgentImpl {
             .expect("Failed to create S3 client");
 
         Self {
-            db_url,
+            db_config,
             s3_client,
             bucket,
         }
@@ -70,7 +71,7 @@ impl S3DocumentLoaderAgent for S3DocumentLoaderAgentImpl {
 
         // Step 3: Process each document
         let mut loaded_document_ids = Vec::new();
-        let mut db_helper: DatabaseHelper = match DatabaseHelper::new(&self.db_url) {
+        let mut db_helper: DatabaseHelper = match DatabaseHelper::new(&self.db_config.db_url()) {
             Ok(helper) => helper,
             Err(e) => return Err(format!("Failed to create database helper: {:?}", e)),
         };
@@ -193,7 +194,7 @@ impl S3DocumentLoaderAgentImpl {
         // For empty namespace, use empty prefix to match working AWS CLI signature
         let trimmed_namespace = namespace.trim_start_matches('/');
         let s3_prefix = if trimmed_namespace.is_empty() {
-            "".to_string()  // Empty prefix for empty namespace (matches working signature)
+            "".to_string() // Empty prefix for empty namespace (matches working signature)
         } else {
             format!("documents/{}/", trimmed_namespace)
         };

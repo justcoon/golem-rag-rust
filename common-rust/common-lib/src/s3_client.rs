@@ -101,13 +101,16 @@ impl S3Client {
         })
     }
 
-    pub fn list_objects(&self, bucket: &str, prefix: Option<&str>) -> S3Result<S3ListResponse> {
-        // For custom endpoints (MinIO/RustFS), use path-style URL
-        let endpoint = if self.endpoint_url.contains("localhost") || !self.endpoint_url.contains("amazonaws.com") {
+    fn build_endpoint_url(&self, bucket: &str) -> String {
+        if self.endpoint_url.contains("localhost") || !self.endpoint_url.contains("amazonaws.com") {
             format!("{}/{}", self.endpoint_url, bucket)
         } else {
             format!("{}.{}.amazonaws.com", bucket, self.region)
-        };
+        }
+    }
+
+    pub fn list_objects(&self, bucket: &str, prefix: Option<&str>) -> S3Result<S3ListResponse> {
+        let endpoint = self.build_endpoint_url(bucket);
         let path = "/";
 
         let mut query_params = Vec::new();
@@ -146,13 +149,17 @@ impl S3Client {
         // Include query string in the path for signature calculation
         // For custom endpoints, include bucket in path; for AWS, use just the path
         let path_for_signature = if query_string.is_empty() {
-            if self.endpoint_url.contains("localhost") || !self.endpoint_url.contains("amazonaws.com") {
+            if self.endpoint_url.contains("localhost")
+                || !self.endpoint_url.contains("amazonaws.com")
+            {
                 format!("/{}{}", bucket, path)
             } else {
                 path.to_string()
             }
         } else {
-            if self.endpoint_url.contains("localhost") || !self.endpoint_url.contains("amazonaws.com") {
+            if self.endpoint_url.contains("localhost")
+                || !self.endpoint_url.contains("amazonaws.com")
+            {
                 format!("/{}{}?{}", bucket, path, query_string)
             } else {
                 format!("{}?{}", path, query_string)
@@ -196,12 +203,7 @@ impl S3Client {
     }
 
     pub fn get_object(&self, bucket: &str, key: &str) -> S3Result<Vec<u8>> {
-        // For custom endpoints (MinIO/RustFS), use path-style URL
-        let endpoint = if self.endpoint_url.contains("localhost") || !self.endpoint_url.contains("amazonaws.com") {
-            format!("{}/{}", self.endpoint_url, bucket)
-        } else {
-            format!("{}.{}.amazonaws.com", bucket, self.region)
-        };
+        let endpoint = self.build_endpoint_url(bucket);
         let path = format!("/{}", key);
 
         let timestamp = Utc::now().format("%Y%m%dT%H%M%SZ").to_string();
@@ -236,12 +238,7 @@ impl S3Client {
     }
 
     pub fn get_object_metadata(&self, bucket: &str, key: &str) -> S3Result<S3ObjectMetadata> {
-        // For custom endpoints (MinIO/RustFS), use path-style URL
-        let endpoint = if self.endpoint_url.contains("localhost") || !self.endpoint_url.contains("amazonaws.com") {
-            format!("{}/{}", self.endpoint_url, bucket)
-        } else {
-            format!("{}.{}.amazonaws.com", bucket, self.region)
-        };
+        let endpoint = self.build_endpoint_url(bucket);
         let path = format!("/{}", key);
 
         let timestamp = Utc::now().format("%Y%m%dT%H%M%SZ").to_string();
@@ -308,11 +305,15 @@ impl S3Client {
         endpoint: &str,
     ) -> String {
         let date = &timestamp[0..8];
-        
+
         // Extract host from endpoint (exclude bucket name for custom endpoints)
-        let host = if self.endpoint_url.contains("localhost") || !self.endpoint_url.contains("amazonaws.com") {
+        let host = if self.endpoint_url.contains("localhost")
+            || !self.endpoint_url.contains("amazonaws.com")
+        {
             // For custom endpoints, host is just the base URL
-            self.endpoint_url.replace("https://", "").replace("http://", "")
+            self.endpoint_url
+                .replace("https://", "")
+                .replace("http://", "")
         } else {
             // For AWS, use the endpoint as-is
             endpoint.replace("https://", "").replace("http://", "")
@@ -325,7 +326,10 @@ impl S3Client {
             (path, "")
         };
 
-        let canonical_headers = format!("host:{}\nx-amz-content-sha256:{}\nx-amz-date:{}", host, payload_hash, timestamp);
+        let canonical_headers = format!(
+            "host:{}\nx-amz-content-sha256:{}\nx-amz-date:{}",
+            host, payload_hash, timestamp
+        );
         let signed_headers = "host;x-amz-content-sha256;x-amz-date";
 
         let canonical_request = format!(
@@ -371,14 +375,7 @@ impl S3Client {
         let signature = hmac_sha256(&k_signing, string_to_sign.as_bytes());
         hex::encode(signature)
     }
-
-    #[allow(dead_code)]
-    fn hmac_sha256(key: &[u8], data: &[u8]) -> Vec<u8> {
-        let mut mac = Hmac::<Sha256>::new_from_slice(key).expect("HMAC can take key of any size");
-        mac.update(data);
-        mac.finalize().into_bytes().to_vec()
-    }
-
+    
     fn sha256_hex(&self, data: &[u8]) -> String {
         let mut hasher = Sha256::new();
         hasher.update(data);

@@ -61,19 +61,20 @@ pub trait DocumentAgent {
 }
 
 struct DocumentAgentImpl {
-    db_url: String,
+    db_config: PostgresDbConfig,
 }
 
 #[agent_implementation]
 impl DocumentAgent for DocumentAgentImpl {
     fn new() -> Self {
-        let db_url = std::env::var("DB_URL").expect("DB_URL environment variable must be set");
+        let db_config =
+            PostgresDbConfig::from_env().expect("Failed to load PostgresDbConfig from environment");
 
-        Self { db_url }
+        Self { db_config }
     }
 
     fn get_document(&self, document_id: String) -> AgentResult<Option<Document>> {
-        let mut db_helper: DatabaseHelper = match DatabaseHelper::new(&self.db_url) {
+        let mut db_helper: DatabaseHelper = match DatabaseHelper::new(&self.db_config.db_url()) {
             Ok(helper) => helper,
             Err(e) => return Err(format!("Failed to create database helper: {:?}", e)),
         };
@@ -96,7 +97,7 @@ impl DocumentAgent for DocumentAgentImpl {
         filters: Option<DocumentFilters>,
         limit: Option<usize>,
     ) -> AgentResult<Vec<Document>> {
-        let db_helper: DatabaseHelper = match DatabaseHelper::new(&self.db_url) {
+        let db_helper: DatabaseHelper = match DatabaseHelper::new(&self.db_config.db_url()) {
             Ok(helper) => helper,
             Err(e) => return Err(format!("Failed to create database helper: {:?}", e)),
         };
@@ -121,7 +122,7 @@ impl DocumentAgent for DocumentAgentImpl {
     }
 
     fn get_document_chunks(&self, document_id: String) -> AgentResult<Vec<DocumentChunk>> {
-        let db_helper: DatabaseHelper = match DatabaseHelper::new(&self.db_url) {
+        let db_helper: DatabaseHelper = match DatabaseHelper::new(&self.db_config.db_url()) {
             Ok(helper) => helper,
             Err(e) => return Err(format!("Failed to create database helper: {:?}", e)),
         };
@@ -148,7 +149,7 @@ impl DocumentAgent for DocumentAgentImpl {
     }
 
     fn document_exists(&self, document_id: String) -> AgentResult<bool> {
-        let mut db_helper: DatabaseHelper = match DatabaseHelper::new(&self.db_url) {
+        let mut db_helper: DatabaseHelper = match DatabaseHelper::new(&self.db_config.db_url()) {
             Ok(helper) => helper,
             Err(e) => return Err(format!("Failed to create database helper: {:?}", e)),
         };

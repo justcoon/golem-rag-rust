@@ -43,7 +43,7 @@ pub trait SearchAgent {
 }
 
 struct SearchAgentImpl {
-    db_url: String,
+    db_config: PostgresDbConfig,
     #[allow(dead_code)]
     embedding_model: String,
 }
@@ -51,13 +51,14 @@ struct SearchAgentImpl {
 #[agent_implementation]
 impl SearchAgent for SearchAgentImpl {
     fn new() -> Self {
-        let db_url = std::env::var("DB_URL").expect("DB_URL environment variable must be set");
+        let db_config =
+            PostgresDbConfig::from_env().expect("Failed to load PostgresDbConfig from environment");
 
         let embedding_model =
             std::env::var("EMBEDDING_MODEL").unwrap_or_else(|_| "mock-embedding-v1".to_string());
 
         Self {
-            db_url,
+            db_config,
             embedding_model,
         }
     }
@@ -70,7 +71,7 @@ impl SearchAgent for SearchAgentImpl {
     ) -> AgentResult<Vec<SearchResult>> {
         log::info!("Performing semantic search for query: {}", query);
 
-        let db_helper: DatabaseHelper = match DatabaseHelper::new(&self.db_url) {
+        let db_helper: DatabaseHelper = match DatabaseHelper::new(&self.db_config.db_url()) {
             Ok(helper) => helper,
             Err(e) => return Err(format!("Failed to create database helper: {:?}", e)),
         };
@@ -97,7 +98,7 @@ impl SearchAgent for SearchAgentImpl {
     ) -> AgentResult<Vec<SearchResult>> {
         log::info!("Performing filtered search for query: {}", query);
 
-        let db_helper: DatabaseHelper = match DatabaseHelper::new(&self.db_url) {
+        let db_helper: DatabaseHelper = match DatabaseHelper::new(&self.db_config.db_url()) {
             Ok(helper) => helper,
             Err(e) => return Err(format!("Failed to create database helper: {:?}", e)),
         };
@@ -130,7 +131,7 @@ impl SearchAgent for SearchAgentImpl {
     ) -> AgentResult<Vec<SearchResult>> {
         log::info!("Finding similar documents to: {}", document_id);
 
-        let db_helper: DatabaseHelper = match DatabaseHelper::new(&self.db_url) {
+        let db_helper: DatabaseHelper = match DatabaseHelper::new(&self.db_config.db_url()) {
             Ok(helper) => helper,
             Err(e) => return Err(format!("Failed to create database helper: {:?}", e)),
         };

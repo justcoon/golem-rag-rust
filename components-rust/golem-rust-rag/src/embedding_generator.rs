@@ -34,7 +34,7 @@ pub trait EmbeddingGeneratorAgent {
 }
 
 struct EmbeddingGeneratorAgentImpl {
-    db_url: String,
+    db_config: PostgresDbConfig,
     embedding_client: Option<EmbeddingClient>,
     embedding_provider: Option<EmbeddingProvider>,
     chunk_config: ChunkConfig,
@@ -43,7 +43,8 @@ struct EmbeddingGeneratorAgentImpl {
 #[agent_implementation]
 impl EmbeddingGeneratorAgent for EmbeddingGeneratorAgentImpl {
     fn new() -> Self {
-        let db_url = std::env::var("DB_URL").expect("DB_URL environment variable must be set");
+        let db_config =
+            PostgresDbConfig::from_env().expect("Failed to load PostgresDbConfig from environment");
 
         // Initialize embedding client if available
         let (embedding_client, embedding_provider) = match EmbeddingClient::from_env() {
@@ -57,7 +58,7 @@ impl EmbeddingGeneratorAgent for EmbeddingGeneratorAgentImpl {
         let chunk_config = ChunkConfig::default();
 
         Self {
-            db_url,
+            db_config,
             embedding_client,
             embedding_provider,
             chunk_config,
@@ -68,7 +69,7 @@ impl EmbeddingGeneratorAgent for EmbeddingGeneratorAgentImpl {
         log::info!("Generating embeddings for document: {}", document_id);
 
         // Connect to database
-        let mut db_helper: DatabaseHelper = match DatabaseHelper::new(&self.db_url) {
+        let mut db_helper: DatabaseHelper = match DatabaseHelper::new(&self.db_config.db_url()) {
             Ok(helper) => helper,
             Err(e) => return Err(format!("Failed to create database helper: {:?}", e)),
         };
@@ -140,7 +141,7 @@ impl EmbeddingGeneratorAgent for EmbeddingGeneratorAgentImpl {
     }
 
     async fn get_embedding_status(&self, document_id: String) -> AgentResult<EmbeddingStatus> {
-        let mut db_helper: DatabaseHelper = match DatabaseHelper::new(&self.db_url) {
+        let mut db_helper: DatabaseHelper = match DatabaseHelper::new(&self.db_config.db_url()) {
             Ok(helper) => helper,
             Err(e) => return Err(format!("Failed to create database helper: {:?}", e)),
         };

@@ -11,8 +11,36 @@ pub use golem_rust::bindings::golem::rdbms::postgres::{
 };
 
 #[derive(Clone, Debug, Schema, Serialize, Deserialize)]
-pub struct DatabaseConfig {
-    pub url: String,
+pub struct PostgresDbConfig {
+    pub host: String,
+    pub db: String,
+    pub user: String,
+    pub password: String,
+    pub port: String,
+}
+
+impl PostgresDbConfig {
+    pub fn from_env() -> Result<Self> {
+        Ok(Self {
+            host: std::env::var("POSTGRES_HOST")
+                .map_err(|_| anyhow::anyhow!("POSTGRES_HOST environment variable not set"))?,
+            db: std::env::var("POSTGRES_DB")
+                .map_err(|_| anyhow::anyhow!("POSTGRES_DB environment variable not set"))?,
+            user: std::env::var("POSTGRES_USER")
+                .map_err(|_| anyhow::anyhow!("POSTGRES_USER environment variable not set"))?,
+            password: std::env::var("POSTGRES_PASSWORD")
+                .map_err(|_| anyhow::anyhow!("POSTGRES_PASSWORD environment variable not set"))?,
+            port: std::env::var("POSTGRES_PORT")
+                .map_err(|_| anyhow::anyhow!("POSTGRES_PORT environment variable not set"))?,
+        })
+    }
+
+    pub fn db_url(&self) -> String {
+        format!(
+            "postgresql://{}:{}@{}:{}/{}",
+            self.user, self.password, self.host, self.port, self.db
+        )
+    }
 }
 
 pub struct DatabaseHelper {
