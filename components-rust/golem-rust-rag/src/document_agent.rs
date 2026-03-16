@@ -74,7 +74,7 @@ impl DocumentAgent for DocumentAgentImpl {
     }
 
     fn get_document(&self, document_id: String) -> AgentResult<Option<Document>> {
-        let mut db_helper: DatabaseHelper = match DatabaseHelper::new(&self.db_config.db_url()) {
+        let db_helper: DatabaseHelper = match DatabaseHelper::new(&self.db_config.db_url()) {
             Ok(helper) => helper,
             Err(e) => return Err(format!("Failed to create database helper: {:?}", e)),
         };
@@ -128,7 +128,7 @@ impl DocumentAgent for DocumentAgentImpl {
         };
 
         let query = r#"
-            SELECT chunk_id, chunk_index, chunk_text, start_pos, end_pos, token_count
+            SELECT id, chunk_index, content, start_pos, end_pos, token_count
             FROM document_chunks 
             WHERE document_id = $1 
             ORDER BY chunk_index
@@ -141,7 +141,7 @@ impl DocumentAgent for DocumentAgentImpl {
 
         let mut chunks = Vec::new();
         for row in result.rows {
-            let chunk = self.parse_chunk_from_row(&row)?;
+            let chunk = self.parse_chunk_from_row(&row, &document_id)?;
             chunks.push(chunk);
         }
 
@@ -149,7 +149,7 @@ impl DocumentAgent for DocumentAgentImpl {
     }
 
     fn document_exists(&self, document_id: String) -> AgentResult<bool> {
-        let mut db_helper: DatabaseHelper = match DatabaseHelper::new(&self.db_config.db_url()) {
+        let db_helper: DatabaseHelper = match DatabaseHelper::new(&self.db_config.db_url()) {
             Ok(helper) => helper,
             Err(e) => return Err(format!("Failed to create database helper: {:?}", e)),
         };
@@ -213,28 +213,29 @@ impl DocumentAgentImpl {
         })
     }
 
-    fn parse_chunk_from_row(&self, row: &PostgresDbRow) -> AgentResult<DocumentChunk> {
+    fn parse_chunk_from_row(
+        &self,
+        row: &PostgresDbRow,
+        document_id: &str,
+    ) -> AgentResult<DocumentChunk> {
         let chunk_id = try_match!(&row.values[0], PostgresDbValue::Text(id) => id.clone())
             .map_err(|_| "Invalid chunk ID type".to_string())?;
-        let document_id =
-            try_match!(&row.values[1], PostgresDbValue::Text(document_id) => document_id.clone())
-                .map_err(|_| "Invalid document ID type".to_string())?;
-        let chunk_index = try_match!(&row.values[2], PostgresDbValue::Int4(index) => *index as u32)
+        let chunk_index = try_match!(&row.values[1], PostgresDbValue::Int4(index) => *index as u32)
             .map_err(|_| "Invalid chunk index type".to_string())?;
-        let chunk_text = try_match!(&row.values[3], PostgresDbValue::Text(text) => text.clone())
+        let chunk_text = try_match!(&row.values[2], PostgresDbValue::Text(text) => text.clone())
             .map_err(|_| "Invalid chunk text type".to_string())?;
-        let start_pos = try_match!(&row.values[4], PostgresDbValue::Int4(pos) => *pos as u32)
+        let start_pos = try_match!(&row.values[3], PostgresDbValue::Int4(pos) => *pos as u32)
             .map_err(|_| "Invalid start position type".to_string())?;
-        let end_pos = try_match!(&row.values[5], PostgresDbValue::Int4(pos) => *pos as u32)
+        let end_pos = try_match!(&row.values[4], PostgresDbValue::Int4(pos) => *pos as u32)
             .map_err(|_| "Invalid end position type".to_string())?;
-        let token_count = match &row.values[6] {
+        let token_count = match &row.values[5] {
             PostgresDbValue::Int4(count) => Some(*count as u32),
             _ => None,
         };
 
         Ok(DocumentChunk {
             id: chunk_id,
-            document_id,
+            document_id: document_id.to_string(),
             content: chunk_text,
             chunk_index,
             start_pos,

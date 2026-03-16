@@ -71,7 +71,7 @@ impl S3DocumentLoaderAgent for S3DocumentLoaderAgentImpl {
 
         // Step 3: Process each document
         let mut loaded_document_ids = Vec::new();
-        let mut db_helper: DatabaseHelper = match DatabaseHelper::new(&self.db_config.db_url()) {
+        let db_helper: DatabaseHelper = match DatabaseHelper::new(&self.db_config.db_url()) {
             Ok(helper) => helper,
             Err(e) => return Err(format!("Failed to create database helper: {:?}", e)),
         };

@@ -323,7 +323,7 @@ impl SearchAgentImpl {
         // Convert the array values to f32 vector
         let embedding: Vec<f32> = embedding_array
             .iter()
-            .map(|lazy_value| match lazy_value.get() {
+            .map(|lazy_value: &PostgresLazyDbValue| match lazy_value.get() {
                 PostgresDbValue::Float4(value) => value,
                 _ => panic!("Expected Float4 in embedding array"),
             })

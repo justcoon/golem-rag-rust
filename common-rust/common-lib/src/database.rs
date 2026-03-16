@@ -7,7 +7,8 @@ use try_match::try_match;
 // Re-export Golem RDBMS types for convenience
 pub use golem_rust::bindings::golem::rdbms::postgres::{
     DbColumnType as PostgresDbColumnType, DbConnection as PostgresDbConnection,
-    DbRow as PostgresDbRow, DbValue as PostgresDbValue, LazyDbValue as PostgresLazyDbValue,
+    DbRow as PostgresDbRow, DbTransaction as PostgresDbTransaction, DbValue as PostgresDbValue,
+    LazyDbValue as PostgresLazyDbValue,
 };
 
 #[derive(Clone, Debug, Schema, Serialize, Deserialize)]
@@ -53,7 +54,53 @@ impl DatabaseHelper {
         Ok(Self { connection })
     }
 
-    pub fn document_exists_by_s3_key(&mut self, s3_key: &str) -> Result<bool> {
+    /// Execute a function within a database transaction
+    ///
+    /// # Arguments
+    /// * `f` - A function that takes a transaction reference and returns a Result
+    ///
+    /// # Returns
+    /// The result of the function, with automatic commit/rollback handling
+    pub fn with_transaction<F, R>(&self, f: F) -> Result<R>
+    where
+        F: FnOnce(&PostgresDbTransaction) -> Result<R>,
+    {
+        let transaction = self.connection.begin_transaction()?;
+
+        match f(&transaction) {
+            Ok(result) => {
+                transaction.commit()?;
+                Ok(result)
+            }
+            Err(e) => {
+                if let Err(rollback_err) = transaction.rollback() {
+                    log::error!("Failed to rollback transaction: {:?}", rollback_err);
+                }
+                Err(e)
+            }
+        }
+    }
+
+    /// Delete from multiple tables in a single transaction
+    ///
+    /// # Arguments
+    /// * `document_id` - The document ID to delete
+    /// * `tables` - Array of table names to delete from
+    ///
+    /// # Returns
+    /// Ok(()) if all deletions succeeded, error if any failed
+    pub fn delete_from_tables(&self, document_id: &str, tables: &[&str]) -> Result<()> {
+        self.with_transaction(|transaction| {
+            for table in tables {
+                let query = format!("DELETE FROM {} WHERE document_id = $1", table);
+                transaction
+                    .execute(&query, vec![PostgresDbValue::Text(document_id.to_string())])?;
+            }
+            Ok(())
+        })
+    }
+
+    pub fn document_exists_by_s3_key(&self, s3_key: &str) -> Result<bool> {
         let query =
             "SELECT COUNT(*) FROM documents WHERE metadata->'source_metadata'->>'s3_key' = $1";
         let result = self
@@ -67,10 +114,10 @@ impl DatabaseHelper {
             })
     }
 
-    pub fn store_document(&mut self, document: &Document) -> Result<String> {
+    pub fn store_document(&self, document: &Document) -> Result<String> {
         let document_id = document.id.clone();
 
-        self.connection.execute(
+        self.connection .execute(
             "INSERT INTO documents (id, title, content, metadata, created_at, updated_at, tags, source, namespace, size_bytes) 
              VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)",
             vec![
@@ -90,7 +137,7 @@ impl DatabaseHelper {
         Ok(document_id)
     }
 
-    pub fn load_document(&mut self, document_id: &str) -> Result<Option<Document>> {
+    pub fn load_document(&self, document_id: &str) -> Result<Option<Document>> {
         let query = "SELECT id, title, content, metadata, source, namespace, tags, size_bytes, created_at::text, updated_at::text FROM documents WHERE id = $1";
         let result = self
             .connection
@@ -151,7 +198,7 @@ impl DatabaseHelper {
         }))
     }
 
-    pub fn document_exists(&mut self, document_id: &str) -> Result<bool> {
+    pub fn document_exists(&self, document_id: &str) -> Result<bool> {
         let query = "SELECT COUNT(*) FROM documents WHERE id = $1";
         let result = self
             .connection
@@ -165,7 +212,7 @@ impl DatabaseHelper {
     }
 
     pub fn update_embedding_status(
-        &mut self,
+        &self,
         document_id: &str,
         status: &EmbeddingStatus,
     ) -> Result<()> {
@@ -176,7 +223,7 @@ impl DatabaseHelper {
             EmbeddingStatus::Failed { error } => format!("failed:{}", error),
         };
 
-        self.connection.execute(
+        self.connection .execute(
             "UPDATE document_embeddings SET embedding_status = $1, updated_at = NOW() WHERE document_id = $2",
             vec![
                 PostgresDbValue::Text(status_str),
@@ -187,7 +234,7 @@ impl DatabaseHelper {
         Ok(())
     }
 
-    pub fn get_embedding_status(&mut self, document_id: &str) -> Result<EmbeddingStatus> {
+    pub fn get_embedding_status(&self, document_id: &str) -> Result<EmbeddingStatus> {
         let query = "SELECT embedding_status, chunk_count FROM document_embeddings WHERE document_id = $1 LIMIT 1";
         let result = self
             .connection
@@ -223,14 +270,14 @@ impl DatabaseHelper {
         }
     }
 
-    pub fn store_embedding(&mut self, embedding: &Embedding) -> Result<()> {
+    pub fn store_embedding(&self, embedding: &Embedding) -> Result<()> {
         let vector_params: Vec<PostgresLazyDbValue> = embedding
             .vector
             .iter()
             .map(|&v| PostgresLazyDbValue::new(PostgresDbValue::Float4(v)))
             .collect();
 
-        self.connection.execute(
+        self.connection .execute(
             "INSERT INTO document_embeddings (id, document_id, chunk_index, chunk_text, embedding, embedding_status, created_at, updated_at) 
              VALUES ($1, $2, $3, $4, $5, $6, $7::timestamptz, $8::timestamptz)",
             vec![
@@ -248,8 +295,8 @@ impl DatabaseHelper {
         Ok(())
     }
 
-    pub fn store_document_chunk(&mut self, chunk: &DocumentChunk) -> Result<()> {
-        self.connection.execute(
+    pub fn store_document_chunk(&self, chunk: &DocumentChunk) -> Result<()> {
+        self.connection .execute(
             "INSERT INTO document_chunks (id, document_id, content, chunk_index, start_pos, end_pos, token_count) 
              VALUES ($1, $2, $3, $4, $5, $6, $7)",
             vec![
