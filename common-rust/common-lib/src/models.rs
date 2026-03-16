@@ -7,18 +7,18 @@ pub struct Document {
     pub id: String,
     pub title: String,
     pub content: String,
+    pub source: String,
+    pub namespace: String,
+    pub tags: Vec<String>,
+    pub size_bytes: u64,
+    pub created_at: String,
+    pub updated_at: String,
     pub metadata: DocumentMetadata,
 }
 
 #[derive(Clone, Debug, Schema, Serialize, Deserialize)]
 pub struct DocumentMetadata {
-    pub source: String,
-    pub namespace: String,
-    pub created_at: String,
-    pub updated_at: String,
-    pub tags: Vec<String>,
     pub content_type: ContentType,
-    pub size_bytes: u64,
     pub source_metadata: HashMap<String, String>,
     pub metadata: HashMap<String, String>,
 }
@@ -84,7 +84,6 @@ pub struct Embedding {
 #[derive(Clone, Debug, Schema, Serialize, Deserialize)]
 pub struct SearchResult {
     pub chunk: DocumentChunk,
-    pub document: Document,
     pub similarity_score: f32,
     pub relevance_explanation: Option<String>,
 }

@@ -171,14 +171,44 @@ impl DocumentAgentImpl {
         let metadata_str =
             try_match!(&row.values[3], PostgresDbValue::Jsonb(metadata) => metadata.clone())
                 .map_err(|_| "Invalid metadata type".to_string())?;
+        let source = try_match!(&row.values[4], PostgresDbValue::Text(source) => source.clone())
+            .map_err(|_| "Invalid source type".to_string())?;
+        let namespace =
+            try_match!(&row.values[5], PostgresDbValue::Text(namespace) => namespace.clone())
+                .map_err(|_| "Invalid namespace type".to_string())?;
+        let tags_str = try_match!(&row.values[6], PostgresDbValue::Array(tags) => tags)
+            .map_err(|_| "Invalid tags type".to_string())?;
+        let size_bytes = try_match!(&row.values[7], PostgresDbValue::Int8(size) => *size)
+            .map_err(|_| "Invalid size_bytes type".to_string())?;
+        let created_at =
+            try_match!(&row.values[8], PostgresDbValue::Text(created_at) => created_at.clone())
+                .map_err(|_| "Invalid created_at type".to_string())?;
+        let updated_at =
+            try_match!(&row.values[9], PostgresDbValue::Text(updated_at) => updated_at.clone())
+                .map_err(|_| "Invalid updated_at type".to_string())?;
 
         let metadata: DocumentMetadata = serde_json::from_str(&metadata_str)
             .map_err(|e| format!("Failed to parse document metadata: {:?}", e))?;
+
+        // Parse PostgreSQL array to Vec<String>
+        let tags: Vec<String> = tags_str
+            .iter()
+            .map(|lazy_value| match lazy_value.get() {
+                PostgresDbValue::Text(tag) => tag.clone(),
+                _ => panic!("Expected Text in tags array"),
+            })
+            .collect();
 
         Ok(Document {
             id,
             title,
             content,
+            source,
+            namespace,
+            tags,
+            size_bytes: size_bytes as u64,
+            created_at,
+            updated_at,
             metadata,
         })
     }
@@ -243,7 +273,7 @@ impl DocumentAgentImpl {
             // Add tag filters
             if !filters.tags.is_empty() {
                 for tag in &filters.tags {
-                    query_conditions.push(format!("metadata->'tags' ? ${}", param_index));
+                    query_conditions.push(format!("tags ? ${}", param_index));
                     params.push(PostgresDbValue::Text(tag.clone()));
                     param_index += 1;
                 }
@@ -251,8 +281,13 @@ impl DocumentAgentImpl {
 
             // Add source filters
             if !filters.sources.is_empty() {
+                let placeholders: Vec<String> = filters
+                    .sources
+                    .iter()
+                    .map(|_| format!("${}", param_index + 1))
+                    .collect();
+                query_conditions.push(format!("source IN ({})", placeholders.join(", ")));
                 for source in &filters.sources {
-                    query_conditions.push(format!("metadata->>'source' = ${}", param_index));
                     params.push(PostgresDbValue::Text(source.clone()));
                     param_index += 1;
                 }
@@ -260,13 +295,14 @@ impl DocumentAgentImpl {
 
             // Add date range filter
             if let Some(date_range) = &filters.date_range {
-                query_conditions.push(format!("created_at >= ${}", param_index));
+                query_conditions.push(format!(
+                    "created_at BETWEEN ${}::timestamptz AND ${}::timestamptz",
+                    param_index,
+                    param_index + 1
+                ));
                 params.push(PostgresDbValue::Text(date_range.start.clone()));
-                param_index += 1;
-
-                query_conditions.push(format!("created_at <= ${}", param_index));
                 params.push(PostgresDbValue::Text(date_range.end.clone()));
-                // param_index += 1; // Not needed since this is the last parameter
+                // param_index += 2; // Not needed since this is the last parameter
             }
         }
 
@@ -278,7 +314,7 @@ impl DocumentAgentImpl {
 
         let sql_query = format!(
             r#"
-            SELECT id, title, metadata, created_at, updated_at
+            SELECT id, title, content, metadata, source, namespace, tags, size_bytes, created_at::text, updated_at::text
             FROM documents
             {}
             ORDER BY created_at DESC

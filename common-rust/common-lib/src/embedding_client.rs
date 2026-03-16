@@ -53,14 +53,20 @@ pub struct OpenAIEmbeddingErrorDetail {
 }
 
 pub struct EmbeddingClient {
+    pub model: String,
+    pub provider: EmbeddingProvider,
     api_base: String,
     api_key: String,
-    model: String,
     client: Client,
 }
 
 impl EmbeddingClient {
-    pub fn new(api_base: String, api_key: String, model: String) -> Result<Self> {
+    pub fn new(
+        api_base: String,
+        api_key: String,
+        model: String,
+        provider: EmbeddingProvider,
+    ) -> Result<Self> {
         let client = Client::builder()
             .timeout(std::time::Duration::from_secs(30))
             .build()
@@ -70,6 +76,7 @@ impl EmbeddingClient {
             api_base,
             api_key,
             model,
+            provider,
             client,
         })
     }
@@ -78,11 +85,10 @@ impl EmbeddingClient {
     pub async fn generate_embedding(&self, text: &str) -> Result<Vec<f32>> {
         log::info!("Generating embedding for text: {}", text);
 
-        // Check if this is Ollama or OpenAI-compatible API
-        if self.api_base.contains("localhost") || self.api_base.contains("127.0.0.1") {
-            self.generate_ollama_embedding(text).await
-        } else {
-            self.generate_openai_embedding(text).await
+        match self.provider {
+            EmbeddingProvider::Ollama => self.generate_ollama_embedding(text).await,
+            EmbeddingProvider::OpenAI => self.generate_openai_embedding(text).await,
+            EmbeddingProvider::Mock => Ok(Self::mock_embedding(text, 768)),
         }
     }
 
@@ -217,7 +223,7 @@ impl EmbeddingClient {
     }
 }
 
-#[derive(Clone, Debug, Schema, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Schema, Serialize, Deserialize)]
 pub enum EmbeddingProvider {
     Ollama,
     OpenAI,
@@ -225,38 +231,33 @@ pub enum EmbeddingProvider {
 }
 
 impl EmbeddingClient {
-    pub fn from_env() -> Result<(Self, EmbeddingProvider)> {
+    pub fn from_env() -> Result<Self> {
         let api_base = std::env::var("EMBEDDING_API_BASE")
             .unwrap_or_else(|_| "http://localhost:11434".to_string());
         let api_key = std::env::var("EMBEDDING_API_KEY").unwrap_or_else(|_| "ollama".to_string());
         let model =
             std::env::var("EMBEDDING_MODEL").unwrap_or_else(|_| "nomic-embed-text".to_string());
 
-        let client = Self::new(api_base.clone(), api_key.clone(), model.clone())?;
-
-        // Determine provider based on API base
-        let provider = if api_base.contains("localhost") || api_base.contains("127.0.0.1") {
-            EmbeddingProvider::Ollama
-        } else if api_base.contains("openai") || api_key.starts_with("sk-") {
-            EmbeddingProvider::OpenAI
-        } else {
-            EmbeddingProvider::Ollama // Default to Ollama
+        let provider_str =
+            std::env::var("EMBEDDING_PROVIDER").unwrap_or_else(|_| "ollama".to_string());
+        let provider = match provider_str.to_lowercase().as_str() {
+            "ollama" => EmbeddingProvider::Ollama,
+            "openai" => EmbeddingProvider::OpenAI,
+            "mock" => EmbeddingProvider::Mock,
+            _ => {
+                log::warn!(
+                    "Unknown EMBEDDING_PROVIDER '{}', defaulting to Ollama",
+                    provider_str
+                );
+                EmbeddingProvider::Ollama
+            }
         };
 
-        log::info!(
-            "Created embedding client for provider: {:?}, model: {}",
-            provider,
-            model
-        );
-        Ok((client, provider))
+        Self::new(api_base, api_key, model, provider)
     }
 
-    pub async fn generate_embedding_with_fallback(
-        &self,
-        text: &str,
-        provider: &EmbeddingProvider,
-    ) -> Result<Vec<f32>> {
-        match provider {
+    pub async fn generate_embedding_with_fallback(&self, text: &str) -> Result<Vec<f32>> {
+        match self.provider {
             EmbeddingProvider::Ollama | EmbeddingProvider::OpenAI => {
                 match self.generate_embedding(text).await {
                     Ok(embedding) => Ok(embedding),

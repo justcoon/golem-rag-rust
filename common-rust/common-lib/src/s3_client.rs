@@ -375,7 +375,7 @@ impl S3Client {
         let signature = hmac_sha256(&k_signing, string_to_sign.as_bytes());
         hex::encode(signature)
     }
-    
+
     fn sha256_hex(&self, data: &[u8]) -> String {
         let mut hasher = Sha256::new();
         hasher.update(data);

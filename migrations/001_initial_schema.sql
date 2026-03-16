@@ -1,3 +1,7 @@
+-- Complete database schema for Golem RAG System
+-- This file creates all necessary tables, indexes, and extensions
+-- Supports nomic-embed-text (768 dimensions) embeddings
+
 -- Enable pgvector extension
 CREATE EXTENSION IF NOT EXISTS vector;
 
@@ -33,7 +37,7 @@ CREATE TABLE IF NOT EXISTS document_embeddings (
     document_id TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
     chunk_index INTEGER NOT NULL,
     chunk_text TEXT NOT NULL,
-    embedding vector(1536),                       -- OpenAI embedding dimension
+    embedding vector(768),                        -- Nomic-embed-text embedding dimension
     embedding_status TEXT NOT NULL DEFAULT 'not_processed',
     chunk_count INTEGER DEFAULT 0,
     error_message TEXT,

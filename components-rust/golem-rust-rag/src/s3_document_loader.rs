@@ -121,14 +121,14 @@ impl S3DocumentLoaderAgent for S3DocumentLoaderAgentImpl {
                         continue;
                     }
                 },
+                source: "s3".to_string(),
+                namespace: namespace.clone(),
+                tags: vec!["s3".to_string(), "auto-loaded".to_string()],
+                size_bytes: s3_doc.size_bytes,
+                created_at: s3_doc.last_modified.clone(),
+                updated_at: s3_doc.last_modified.clone(),
                 metadata: DocumentMetadata {
-                    source: "s3".to_string(),
-                    namespace: namespace.clone(),
-                    created_at: s3_doc.last_modified.clone(),
-                    updated_at: s3_doc.last_modified.clone(),
-                    tags: vec!["s3".to_string(), "auto-loaded".to_string()],
                     content_type: self.map_content_type(&content_type),
-                    size_bytes: s3_doc.size_bytes,
                     source_metadata: {
                         let mut metadata = std::collections::HashMap::new();
                         metadata.insert("s3_key".to_string(), s3_doc.key.clone());

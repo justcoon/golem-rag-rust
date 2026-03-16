@@ -44,8 +44,6 @@ pub trait SearchAgent {
 
 struct SearchAgentImpl {
     db_config: PostgresDbConfig,
-    #[allow(dead_code)]
-    embedding_model: String,
 }
 
 #[agent_implementation]
@@ -53,14 +51,7 @@ impl SearchAgent for SearchAgentImpl {
     fn new() -> Self {
         let db_config =
             PostgresDbConfig::from_env().expect("Failed to load PostgresDbConfig from environment");
-
-        let embedding_model =
-            std::env::var("EMBEDDING_MODEL").unwrap_or_else(|_| "mock-embedding-v1".to_string());
-
-        Self {
-            db_config,
-            embedding_model,
-        }
+        Self { db_config }
     }
 
     async fn search(
@@ -73,18 +64,24 @@ impl SearchAgent for SearchAgentImpl {
 
         let db_helper: DatabaseHelper = match DatabaseHelper::new(&self.db_config.db_url()) {
             Ok(helper) => helper,
-            Err(e) => return Err(format!("Failed to create database helper: {:?}", e)),
+            Err(e) => {
+                log::error!("Failed to create database helper: {:?}", e);
+                return Err(format!("Failed to create database helper: {:?}", e));
+            }
         };
 
         let limit = limit.unwrap_or(10);
         let threshold = threshold.unwrap_or(0.7);
 
-        // Generate query embedding
         let query_embedding = self.generate_query_embedding(&query).await?;
-
-        // Perform vector similarity search
-        let results =
-            self.vector_similarity_search(&db_helper, &query_embedding, limit, threshold)?;
+        let results = self.vector_similarity_search(
+            &db_helper,
+            &query_embedding,
+            &query,
+            limit,
+            threshold,
+            None,
+        )?;
 
         Ok(results)
     }
@@ -106,19 +103,15 @@ impl SearchAgent for SearchAgentImpl {
         let limit = limit.unwrap_or(10);
         let threshold = threshold.unwrap_or(0.7);
 
-        // Generate query embedding
         let query_embedding = self.generate_query_embedding(&query).await?;
-
-        // Build filter conditions
         let filter_conditions = self.build_filter_conditions(&filters);
-
-        // Perform filtered vector similarity search
-        let results = self.filtered_vector_similarity_search(
+        let results = self.vector_similarity_search(
             &db_helper,
             &query_embedding,
-            &filter_conditions,
+            &query,
             limit,
             threshold,
+            Some(&filter_conditions),
         )?;
 
         Ok(results)
@@ -138,19 +131,20 @@ impl SearchAgent for SearchAgentImpl {
 
         let limit = limit.unwrap_or(10);
 
-        // Get document embedding
         let document_embedding = self
             .get_document_embedding(&db_helper, &document_id)
             .await?;
-
-        // Find similar documents
-        let results =
-            self.vector_similarity_search(&db_helper, &document_embedding, limit + 1, 0.5)?;
-
-        // Filter out the original document
+        let results = self.vector_similarity_search(
+            &db_helper,
+            &document_embedding,
+            "",
+            limit + 1,
+            0.5,
+            None,
+        )?;
         let filtered_results: Vec<SearchResult> = results
             .into_iter()
-            .filter(|result| result.document.id != document_id)
+            .filter(|result| result.chunk.document_id != document_id)
             .take(limit)
             .collect();
 
@@ -159,29 +153,71 @@ impl SearchAgent for SearchAgentImpl {
 }
 
 impl SearchAgentImpl {
-    async fn generate_query_embedding(&self, query: &str) -> AgentResult<Vec<f32>> {
-        log::debug!("Generating embedding for query: {}", query);
+    fn extract_search_result_from_row(
+        &self,
+        row: &PostgresDbRow,
+        query: &str,
+        threshold: f32,
+    ) -> AgentResult<Option<SearchResult>> {
+        let chunk_id = try_match!(&row.values[0], PostgresDbValue::Text(id) => id.clone())
+            .map_err(|_| "Invalid chunk ID type".to_string())?;
+        let document_id = try_match!(&row.values[1], PostgresDbValue::Text(id) => id.clone())
+            .map_err(|_| "Invalid document ID type".to_string())?;
+        let chunk_index = try_match!(&row.values[2], PostgresDbValue::Int4(index) => *index as u32)
+            .map_err(|_| "Invalid chunk index type".to_string())?;
+        let chunk_text = try_match!(&row.values[3], PostgresDbValue::Text(text) => text.clone())
+            .map_err(|_| "Invalid chunk text type".to_string())?;
+        let start_pos = try_match!(&row.values[4], PostgresDbValue::Int4(pos) => *pos as u32)
+            .map_err(|_| "Invalid start position type".to_string())?;
+        let end_pos = try_match!(&row.values[5], PostgresDbValue::Int4(pos) => *pos as u32)
+            .map_err(|_| "Invalid end position type".to_string())?;
+        let token_count =
+            try_match!(&row.values[6], PostgresDbValue::Int4(count) => Some(*count as u32))
+                .map_err(|_| "Invalid token count type".to_string())?;
+        let similarity_score = match &row.values[7] {
+            PostgresDbValue::Float4(score) => *score,
+            PostgresDbValue::Float8(score) => *score as f32,
+            PostgresDbValue::Text(text) => text.parse::<f32>().unwrap_or(0.0),
+            _other => 0.0,
+        };
 
-        // Create embedding client and provider from environment
-        let (embedding_client, embedding_provider) = EmbeddingClient::from_env().map_err(|e| {
+        // Filter by threshold
+        if similarity_score >= threshold {
+            let document_chunk = DocumentChunk {
+                id: chunk_id,
+                document_id: document_id.clone(),
+                content: chunk_text.clone(),
+                chunk_index,
+                start_pos,
+                end_pos,
+                token_count,
+            };
+
+            let search_result = SearchResult {
+                chunk: document_chunk,
+                similarity_score,
+                relevance_explanation: self.generate_highlight(&chunk_text, query),
+            };
+
+            Ok(Some(search_result))
+        } else {
+            Ok(None)
+        }
+    }
+
+    async fn generate_query_embedding(&self, query: &str) -> AgentResult<Vec<f32>> {
+        let embedding_client = EmbeddingClient::from_env().map_err(|e| {
             format!(
                 "Failed to create embedding client from environment: {:?}",
                 e
             )
         })?;
 
-        // Use real async HTTP embedding generation with fallback
         match embedding_client
-            .generate_embedding_with_fallback(query, &embedding_provider)
+            .generate_embedding_with_fallback(query)
             .await
         {
-            Ok(embedding) => {
-                log::debug!(
-                    "Successfully generated real query embedding with {} dimensions",
-                    embedding.len()
-                );
-                Ok(embedding)
-            }
+            Ok(embedding) => Ok(embedding),
             Err(e) => {
                 log::error!(
                     "Failed to generate query embedding even with fallback: {:?}",
@@ -196,13 +232,24 @@ impl SearchAgentImpl {
         &self,
         db_helper: &DatabaseHelper,
         query_embedding: &[f32],
+        query: &str,
         limit: usize,
         threshold: f32,
+        filter_conditions: Option<&str>,
     ) -> AgentResult<Vec<SearchResult>> {
-        // Simplified vector similarity search
-        // In a real implementation, this would use pgvector's <-> operator
+        let embedding_str = format!(
+            "[{}]",
+            query_embedding
+                .iter()
+                .map(|x| x.to_string())
+                .collect::<Vec<_>>()
+                .join(",")
+        );
 
-        let query = r#"
+        let filters = filter_conditions.unwrap_or("1=1");
+
+        let sql_query = format!(
+            r#"
             SELECT 
                 dc.id as chunk_id,
                 dc.document_id,
@@ -211,199 +258,38 @@ impl SearchAgentImpl {
                 dc.start_pos,
                 dc.end_pos,
                 dc.token_count,
-                d.title,
-                d.content as document_content,
-                d.metadata
+                MAX(1 - (e.embedding <=> $2::vector)) as similarity_score
             FROM document_chunks dc
-            JOIN documents d ON dc.document_id = d.id
-            JOIN embeddings e ON dc.id = e.chunk_id
-            WHERE e.embedding_status = 'completed'
-            ORDER BY dc.id
+            JOIN document_embeddings e ON dc.document_id = e.document_id AND dc.chunk_index = e.chunk_index
+            WHERE e.embedding_status LIKE 'completed%'
+              AND {}
+            GROUP BY dc.id, dc.document_id, dc.chunk_index, dc.content, dc.start_pos, dc.end_pos, dc.token_count
+            HAVING MAX(1 - (e.embedding <=> $2::vector)) >= $3
+            ORDER BY similarity_score DESC
             LIMIT $1
-        "#;
+            "#,
+            filters
+        );
 
         let result = db_helper
             .connection
-            .query(query, vec![PostgresDbValue::Int4(limit as i32)])
+            .query(
+                &sql_query,
+                vec![
+                    PostgresDbValue::Int4(limit as i32),
+                    PostgresDbValue::Text(embedding_str),
+                    PostgresDbValue::Float4(threshold),
+                ],
+            )
             .map_err(|e| format!("Failed to execute vector search query: {:?}", e))?;
 
         let mut search_results = Vec::new();
 
         for row in result.rows {
-            let chunk_id = try_match!(&row.values[0], PostgresDbValue::Text(id) => id.clone())
-                .map_err(|_| "Invalid chunk ID type".to_string())?;
-            let document_id = try_match!(&row.values[1], PostgresDbValue::Text(id) => id.clone())
-                .map_err(|_| "Invalid document ID type".to_string())?;
-            let chunk_index =
-                try_match!(&row.values[2], PostgresDbValue::Int4(index) => *index as u32)
-                    .map_err(|_| "Invalid chunk index type".to_string())?;
-            let chunk_text =
-                try_match!(&row.values[3], PostgresDbValue::Text(text) => text.clone())
-                    .map_err(|_| "Invalid chunk text type".to_string())?;
-            let start_pos = try_match!(&row.values[4], PostgresDbValue::Int4(pos) => *pos as u32)
-                .map_err(|_| "Invalid start position type".to_string())?;
-            let end_pos = try_match!(&row.values[5], PostgresDbValue::Int4(pos) => *pos as u32)
-                .map_err(|_| "Invalid end position type".to_string())?;
-            let token_count =
-                try_match!(&row.values[6], PostgresDbValue::Int4(count) => Some(*count as u32))
-                    .map_err(|_| "Invalid token count type".to_string())?;
-            let title = try_match!(&row.values[7], PostgresDbValue::Text(title) => title.clone())
-                .map_err(|_| "Invalid title type".to_string())?;
-            let document_content =
-                try_match!(&row.values[8], PostgresDbValue::Text(content) => content.clone())
-                    .map_err(|_| "Invalid document content type".to_string())?;
-            let metadata_str =
-                try_match!(&row.values[9], PostgresDbValue::Jsonb(metadata) => metadata.clone())
-                    .map_err(|_| "Invalid metadata type".to_string())?;
-
-            let metadata: DocumentMetadata = serde_json::from_str(&metadata_str)
-                .map_err(|e| format!("Failed to parse document metadata: {:?}", e))?;
-
-            // Calculate similarity score (mock implementation)
-            let similarity_score = self.calculate_similarity(query_embedding, &[]);
-
-            if similarity_score >= threshold {
-                let document_chunk = DocumentChunk {
-                    id: chunk_id,
-                    document_id: document_id.clone(),
-                    content: chunk_text.clone(),
-                    chunk_index,
-                    start_pos,
-                    end_pos,
-                    token_count,
-                };
-
-                let document = Document {
-                    id: document_id,
-                    title,
-                    content: document_content,
-                    metadata,
-                };
-
-                let search_result = SearchResult {
-                    chunk: document_chunk,
-                    document,
-                    similarity_score,
-                    relevance_explanation: self.generate_highlight(&chunk_text, ""),
-                };
-
-                search_results.push(search_result);
+            if let Some(result) = self.extract_search_result_from_row(&row, query, threshold)? {
+                search_results.push(result);
             }
         }
-
-        // Sort by similarity score
-        search_results.sort_by(|a, b| {
-            b.similarity_score
-                .partial_cmp(&a.similarity_score)
-                .unwrap_or(std::cmp::Ordering::Equal)
-        });
-
-        Ok(search_results)
-    }
-
-    fn filtered_vector_similarity_search(
-        &self,
-        db_helper: &DatabaseHelper,
-        query_embedding: &[f32],
-        filter_conditions: &str,
-        limit: usize,
-        threshold: f32,
-    ) -> AgentResult<Vec<SearchResult>> {
-        // Similar to vector_similarity_search but with additional WHERE clauses
-        let query = format!(
-            r#"
-            SELECT 
-                dc.id as chunk_id,
-                dc.document_id,
-                dc.chunk_index,
-                dc.content as chunk_text,
-                d.title,
-                d.metadata,
-                e.vector
-            FROM document_chunks dc
-            JOIN documents d ON dc.document_id = d.id
-            JOIN embeddings e ON dc.id = e.chunk_id
-            WHERE e.embedding_status = 'completed' AND {}
-            ORDER BY dc.id
-            LIMIT $1
-        "#,
-            filter_conditions
-        );
-
-        let result = db_helper
-            .connection
-            .query(&query, vec![PostgresDbValue::Int4(limit as i32)])
-            .map_err(|e| format!("Failed to execute filtered vector search query: {:?}", e))?;
-
-        // Process results similar to vector_similarity_search
-        let mut search_results = Vec::new();
-
-        for row in result.rows {
-            let chunk_id = try_match!(&row.values[0], PostgresDbValue::Text(id) => id.clone())
-                .map_err(|_| "Invalid chunk ID type".to_string())?;
-            let document_id = try_match!(&row.values[1], PostgresDbValue::Text(id) => id.clone())
-                .map_err(|_| "Invalid document ID type".to_string())?;
-            let chunk_index =
-                try_match!(&row.values[2], PostgresDbValue::Int4(index) => *index as u32)
-                    .map_err(|_| "Invalid chunk index type".to_string())?;
-            let chunk_text =
-                try_match!(&row.values[3], PostgresDbValue::Text(text) => text.clone())
-                    .map_err(|_| "Invalid chunk text type".to_string())?;
-            let start_pos = try_match!(&row.values[4], PostgresDbValue::Int4(pos) => *pos as u32)
-                .map_err(|_| "Invalid start position type".to_string())?;
-            let end_pos = try_match!(&row.values[5], PostgresDbValue::Int4(pos) => *pos as u32)
-                .map_err(|_| "Invalid end position type".to_string())?;
-            let token_count =
-                try_match!(&row.values[6], PostgresDbValue::Int4(count) => Some(*count as u32))
-                    .map_err(|_| "Invalid token count type".to_string())?;
-            let title = try_match!(&row.values[7], PostgresDbValue::Text(title) => title.clone())
-                .map_err(|_| "Invalid title type".to_string())?;
-            let document_content =
-                try_match!(&row.values[8], PostgresDbValue::Text(content) => content.clone())
-                    .map_err(|_| "Invalid document content type".to_string())?;
-            let metadata_str =
-                try_match!(&row.values[9], PostgresDbValue::Jsonb(metadata) => metadata.clone())
-                    .map_err(|_| "Invalid metadata type".to_string())?;
-
-            let metadata: DocumentMetadata = serde_json::from_str(&metadata_str)
-                .map_err(|e| format!("Failed to parse document metadata: {:?}", e))?;
-
-            let similarity_score = self.calculate_similarity(query_embedding, &[]);
-
-            if similarity_score >= threshold {
-                let document_chunk = DocumentChunk {
-                    id: chunk_id,
-                    document_id: document_id.clone(),
-                    content: chunk_text.clone(),
-                    chunk_index,
-                    start_pos,
-                    end_pos,
-                    token_count,
-                };
-
-                let document = Document {
-                    id: document_id,
-                    title,
-                    content: document_content,
-                    metadata,
-                };
-
-                let search_result = SearchResult {
-                    chunk: document_chunk,
-                    document,
-                    similarity_score,
-                    relevance_explanation: self.generate_highlight(&chunk_text, ""),
-                };
-
-                search_results.push(search_result);
-            }
-        }
-
-        search_results.sort_by(|a, b| {
-            b.similarity_score
-                .partial_cmp(&a.similarity_score)
-                .unwrap_or(std::cmp::Ordering::Equal)
-        });
 
         Ok(search_results)
     }
@@ -414,54 +300,36 @@ impl SearchAgentImpl {
         document_id: &str,
     ) -> AgentResult<Vec<f32>> {
         let query = r#"
-            SELECT dc.content
-            FROM document_chunks dc
-            JOIN embeddings e ON dc.id = e.chunk_id
-            WHERE dc.document_id = $1 AND e.embedding_status = 'completed'
+            SELECT e.embedding
+            FROM document_embeddings e
+            WHERE e.document_id = $1 AND e.embedding_status LIKE 'completed%'
             LIMIT 1
         "#;
 
         let result = db_helper
             .connection
             .query(query, vec![PostgresDbValue::Text(document_id.to_string())])
-            .map_err(|e| format!("Failed to get document content: {:?}", e))?;
+            .map_err(|e| format!("Failed to get document embedding: {:?}", e))?;
 
         if result.rows.is_empty() {
-            return Err("Document content not found".to_string());
+            return Err("Document embedding not found".to_string());
         }
 
-        // Get the document content
-        let content = try_match!(&result.rows[0].values[0], PostgresDbValue::Text(content) => content.clone())
-            .map_err(|_| "Invalid content type".to_string())?;
+        // Get the embedding vector from the database
+        let embedding_array =
+            try_match!(&result.rows[0].values[0], PostgresDbValue::Array(array) => array)
+                .map_err(|_| "Invalid embedding type".to_string())?;
 
-        // Create embedding client and provider from environment
-        let (embedding_client, embedding_provider) = EmbeddingClient::from_env().map_err(|e| {
-            format!(
-                "Failed to create embedding client from environment: {:?}",
-                e
-            )
-        })?;
+        // Convert the array values to f32 vector
+        let embedding: Vec<f32> = embedding_array
+            .iter()
+            .map(|lazy_value| match lazy_value.get() {
+                PostgresDbValue::Float4(value) => value,
+                _ => panic!("Expected Float4 in embedding array"),
+            })
+            .collect();
 
-        // Use real async HTTP embedding generation with fallback
-        match embedding_client
-            .generate_embedding_with_fallback(&content, &embedding_provider)
-            .await
-        {
-            Ok(embedding) => {
-                log::debug!(
-                    "Successfully generated real document embedding with {} dimensions",
-                    embedding.len()
-                );
-                Ok(embedding)
-            }
-            Err(e) => {
-                log::error!(
-                    "Failed to generate document embedding even with fallback: {:?}",
-                    e
-                );
-                Err(format!("Failed to generate document embedding: {:?}", e))
-            }
-        }
+        Ok(embedding)
     }
 
     fn build_filter_conditions(&self, filters: &SearchFilters) -> String {
@@ -471,29 +339,34 @@ impl SearchAgentImpl {
             let placeholders: Vec<String> = filters
                 .content_types
                 .iter()
-                .map(|ct| format!("'{}{:?}'", "", ct))
+                .map(|ct| format!("'{}'", format!("{:?}", ct).trim_matches('"')))
                 .collect();
             conditions.push(format!(
-                "d.metadata->>'content_type' IN ({})",
+                "EXISTS (SELECT 1 FROM documents d WHERE d.id = dc.document_id AND d.metadata->>'content_type' IN ({}))",
                 placeholders.join(", ")
             ));
         }
 
         if !filters.tags.is_empty() {
             for tag in &filters.tags {
-                conditions.push(format!("d.metadata->'tags' ? '{}'", tag));
+                conditions.push(format!("EXISTS (SELECT 1 FROM documents d WHERE d.id = dc.document_id AND d.tags ? '{}')", tag));
             }
         }
 
         if !filters.sources.is_empty() {
-            for source in &filters.sources {
-                conditions.push(format!("d.metadata->>'source' = '{}'", source));
-            }
+            let source_conditions: Vec<String> = filters
+                .sources
+                .iter()
+                .map(|source| format!("'{}'", source))
+                .collect();
+            conditions.push(format!(
+                "EXISTS (SELECT 1 FROM documents d WHERE d.id = dc.document_id AND d.source IN ({}))",
+                source_conditions.join(", ")
+            ));
         }
 
         if let Some(ref date_range) = filters.date_range {
-            conditions.push(format!("d.created_at >= '{}'", date_range.start));
-            conditions.push(format!("d.created_at <= '{}'", date_range.end));
+            conditions.push(format!("EXISTS (SELECT 1 FROM documents d WHERE d.id = dc.document_id AND d.created_at BETWEEN '{}'::timestamptz AND '{}'::timestamptz)", date_range.start, date_range.end));
         }
 
         if conditions.is_empty() {
@@ -501,39 +374,6 @@ impl SearchAgentImpl {
         } else {
             conditions.join(" AND ")
         }
-    }
-
-    fn calculate_similarity(&self, query_embedding: &[f32], _document_embedding: &[f32]) -> f32 {
-        // Mock similarity calculation
-        // In a real implementation, this would calculate cosine similarity
-        use std::collections::hash_map::DefaultHasher;
-        use std::hash::{Hash, Hasher};
-
-        let mut hasher = DefaultHasher::new();
-        query_embedding
-            .iter()
-            .for_each(|&x| x.to_bits().hash(&mut hasher));
-        let hash = hasher.finish();
-
-        (hash % 1000) as f32 / 1000.0
-    }
-
-    #[allow(dead_code)]
-    fn calculate_keyword_score(&self, chunk_text: &str, title: &str, query: &str) -> f32 {
-        // Simple keyword scoring based on term frequency
-        let combined_text = format!("{} {}", title.to_lowercase(), chunk_text.to_lowercase());
-        let query_lower = query.to_lowercase();
-
-        let query_words: Vec<&str> = query_lower.split_whitespace().collect();
-        let mut score = 0.0;
-
-        for word in &query_words {
-            let count = combined_text.matches(word).count() as f32;
-            score += count * 0.1; // Each occurrence adds 0.1 to the score
-        }
-
-        // Normalize score
-        (score / query_words.len() as f32).min(1.0)
     }
 
     fn generate_highlight(&self, chunk_text: &str, query: &str) -> Option<String> {

@@ -160,6 +160,7 @@ components:
       S3_ENDPOINT_URL: "{{ S3_ENDPOINT_URL }}"
       
       # Embedding Configuration
+      EMBEDDING_PROVIDER: "{{ EMBEDDING_PROVIDER }}"
       EMBEDDING_API_BASE: "{{ EMBEDDING_API_BASE }}"
       EMBEDDING_API_KEY: "{{ EMBEDDING_API_KEY }}"
       EMBEDDING_MODEL: "{{ EMBEDDING_MODEL }}"

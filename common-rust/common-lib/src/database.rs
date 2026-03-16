@@ -78,12 +78,12 @@ impl DatabaseHelper {
                 PostgresDbValue::Text(document.title.clone()),
                 PostgresDbValue::Text(document.content.clone()),
                 PostgresDbValue::Jsonb(serde_json::to_string(&document.metadata)?),
-                PostgresDbValue::Text(document.metadata.created_at.clone()),
-                PostgresDbValue::Text(document.metadata.updated_at.clone()),
-                PostgresDbValue::Jsonb(serde_json::to_string(&document.metadata.tags)?),
-                PostgresDbValue::Text(document.metadata.source.clone()),
-                PostgresDbValue::Text(document.metadata.namespace.clone()),
-                PostgresDbValue::Int8(document.metadata.size_bytes as i64),
+                PostgresDbValue::Text(document.created_at.clone()),
+                PostgresDbValue::Text(document.updated_at.clone()),
+                PostgresDbValue::Array(document.tags.iter().map(|tag| PostgresLazyDbValue::new(PostgresDbValue::Text(tag.clone()))).collect()),
+                PostgresDbValue::Text(document.source.clone()),
+                PostgresDbValue::Text(document.namespace.clone()),
+                PostgresDbValue::Int8(document.size_bytes as i64),
             ]
         )?;
 
@@ -91,7 +91,7 @@ impl DatabaseHelper {
     }
 
     pub fn load_document(&mut self, document_id: &str) -> Result<Option<Document>> {
-        let query = "SELECT id, title, content, metadata FROM documents WHERE id = $1";
+        let query = "SELECT id, title, content, metadata, source, namespace, tags, size_bytes, created_at::text, updated_at::text FROM documents WHERE id = $1";
         let result = self
             .connection
             .query(query, vec![PostgresDbValue::Text(document_id.to_string())])?;
@@ -110,13 +110,43 @@ impl DatabaseHelper {
         let metadata_str =
             try_match!(&row.values[3], PostgresDbValue::Jsonb(metadata) => metadata.clone())
                 .map_err(|_| anyhow::anyhow!("Invalid metadata type"))?;
+        let source = try_match!(&row.values[4], PostgresDbValue::Text(source) => source.clone())
+            .map_err(|_| anyhow::anyhow!("Invalid source type"))?;
+        let namespace =
+            try_match!(&row.values[5], PostgresDbValue::Text(namespace) => namespace.clone())
+                .map_err(|_| anyhow::anyhow!("Invalid namespace type"))?;
+        let tags_str = try_match!(&row.values[6], PostgresDbValue::Array(tags) => tags)
+            .map_err(|_| anyhow::anyhow!("Invalid tags type"))?;
+        let size_bytes = try_match!(&row.values[7], PostgresDbValue::Int8(size) => *size)
+            .map_err(|_| anyhow::anyhow!("Invalid size_bytes type"))?;
+        let created_at =
+            try_match!(&row.values[8], PostgresDbValue::Text(created_at) => created_at.clone())
+                .map_err(|_| anyhow::anyhow!("Invalid created_at type"))?;
+        let updated_at =
+            try_match!(&row.values[9], PostgresDbValue::Text(updated_at) => updated_at.clone())
+                .map_err(|_| anyhow::anyhow!("Invalid updated_at type"))?;
 
         let metadata: DocumentMetadata = serde_json::from_str(&metadata_str)?;
+
+        // Parse PostgreSQL array to Vec<String>
+        let tags: Vec<String> = tags_str
+            .iter()
+            .map(|lazy_value| match lazy_value.get() {
+                PostgresDbValue::Text(tag) => tag.clone(),
+                _ => panic!("Expected Text in tags array"),
+            })
+            .collect();
 
         Ok(Some(Document {
             id,
             title,
             content,
+            source,
+            namespace,
+            tags,
+            size_bytes: size_bytes as u64,
+            created_at,
+            updated_at,
             metadata,
         }))
     }
@@ -201,14 +231,17 @@ impl DatabaseHelper {
             .collect();
 
         self.connection.execute(
-            "INSERT INTO document_embeddings (id, chunk_id, embedding, model_name, created_at) 
-             VALUES ($1, $2, $3, $4, $5)",
+            "INSERT INTO document_embeddings (id, document_id, chunk_index, chunk_text, embedding, embedding_status, created_at, updated_at) 
+             VALUES ($1, $2, $3, $4, $5, $6, $7::timestamptz, $8::timestamptz)",
             vec![
                 PostgresDbValue::Text(embedding.id.clone()),
-                PostgresDbValue::Text(embedding.chunk_id.clone()),
+                PostgresDbValue::Text(embedding.chunk_id.clone()), // Using chunk_id as document_id for now
+                PostgresDbValue::Int4(0), // chunk_index - will need to be updated
+                PostgresDbValue::Text("chunk_text_placeholder".to_string()), // chunk_text placeholder
                 PostgresDbValue::Array(vector_params),
-                PostgresDbValue::Text(embedding.model_name.clone()),
+                PostgresDbValue::Text("completed".to_string()), // embedding_status
                 PostgresDbValue::Text(embedding.created_at.clone()),
+                PostgresDbValue::Text(embedding.created_at.clone()), // updated_at same as created_at
             ],
         )?;
 

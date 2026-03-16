@@ -1,10 +1,11 @@
+use chrono::Utc;
 use common_lib::*;
 use golem_rust::{agent_definition, agent_implementation};
 use std::string::String;
 
 pub type AgentResult<T> = std::result::Result<T, String>;
 
-#[agent_definition]
+#[agent_definition(ephemeral)]
 pub trait EmbeddingGeneratorAgent {
     fn new() -> Self;
 
@@ -36,7 +37,6 @@ pub trait EmbeddingGeneratorAgent {
 struct EmbeddingGeneratorAgentImpl {
     db_config: PostgresDbConfig,
     embedding_client: Option<EmbeddingClient>,
-    embedding_provider: Option<EmbeddingProvider>,
     chunk_config: ChunkConfig,
 }
 
@@ -47,11 +47,11 @@ impl EmbeddingGeneratorAgent for EmbeddingGeneratorAgentImpl {
             PostgresDbConfig::from_env().expect("Failed to load PostgresDbConfig from environment");
 
         // Initialize embedding client if available
-        let (embedding_client, embedding_provider) = match EmbeddingClient::from_env() {
-            Ok((client, provider)) => (Some(client), Some(provider)),
+        let embedding_client = match EmbeddingClient::from_env() {
+            Ok(client) => Some(client),
             Err(e) => {
                 log::warn!("Failed to initialize embedding client: {:?}", e);
-                (None, None)
+                None
             }
         };
 
@@ -60,7 +60,6 @@ impl EmbeddingGeneratorAgent for EmbeddingGeneratorAgentImpl {
         Self {
             db_config,
             embedding_client,
-            embedding_provider,
             chunk_config,
         }
     }
@@ -289,33 +288,25 @@ impl EmbeddingGeneratorAgentImpl {
         // Generate embedding using real HTTP client
         let embedding_vector = match &self.embedding_client {
             Some(client) => {
-                match &self.embedding_provider {
-                    Some(_provider) => {
-                        log::debug!(
-                            "Generating real embedding for chunk: {}",
-                            &chunk.content[..chunk.content.len().min(100)]
-                        );
+                log::debug!(
+                    "Generating real embedding for chunk: {}",
+                    &chunk.content[..chunk.content.len().min(100)]
+                );
 
-                        // Use async call directly
-                        match client.generate_embedding(&chunk.content).await {
-                            Ok(embedding) => {
-                                log::debug!(
-                                    "Successfully generated real embedding with {} dimensions",
-                                    embedding.len()
-                                );
-                                embedding
-                            }
-                            Err(e) => {
-                                log::warn!(
-                                    "Failed to generate real embedding, falling back to mock: {:?}",
-                                    e
-                                );
-                                EmbeddingClient::mock_embedding(&chunk.content, 768)
-                            }
-                        }
+                // Use async call directly
+                match client.generate_embedding(&chunk.content).await {
+                    Ok(embedding) => {
+                        log::debug!(
+                            "Successfully generated real embedding with {} dimensions",
+                            embedding.len()
+                        );
+                        embedding
                     }
-                    None => {
-                        log::debug!("No embedding provider, using mock embedding");
+                    Err(e) => {
+                        log::warn!(
+                            "Failed to generate real embedding, falling back to mock: {:?}",
+                            e
+                        );
                         EmbeddingClient::mock_embedding(&chunk.content, 768)
                     }
                 }
@@ -334,13 +325,13 @@ impl EmbeddingGeneratorAgentImpl {
             return Err(format!("Failed to store document chunk: {:?}", e));
         }
 
-        // Create embedding record
+        // Create embedding record with proper mapping to database schema
         let embedding = Embedding {
             id: uuid::Uuid::new_v4().to_string(),
-            chunk_id: chunk_with_id.id.clone(),
+            chunk_id: document_id.to_string(), // Use document_id instead of chunk_id for now
             vector: embedding_vector,
             model_name: self.get_model_name(),
-            created_at: "2024-01-01T00:00:00Z".to_string(), // Simplified for now
+            created_at: Utc::now().to_rfc3339(), // Use actual current time
         };
 
         // Store embedding
@@ -357,15 +348,10 @@ impl EmbeddingGeneratorAgentImpl {
     }
 
     fn get_model_name(&self) -> String {
-        match &self.embedding_provider {
-            Some(EmbeddingProvider::Ollama) => {
-                std::env::var("EMBEDDING_MODEL").unwrap_or_else(|_| "nomic-embed-text".to_string())
-            }
-            Some(EmbeddingProvider::OpenAI) => std::env::var("EMBEDDING_MODEL")
-                .unwrap_or_else(|_| "text-embedding-ada-002".to_string()),
-            Some(EmbeddingProvider::Mock) => "mock-embedding-v1".to_string(),
-            None => "unknown".to_string(),
-        }
+        self.embedding_client
+            .as_ref()
+            .map(|c| c.model.clone())
+            .unwrap_or("unknown".to_string())
     }
 
     fn mark_as_failed(&self, db_helper: &mut DatabaseHelper, document_id: &str, error: &str) {
