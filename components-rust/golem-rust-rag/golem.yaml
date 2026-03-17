@@ -11,35 +11,6 @@ httpApi:
     golem-rust-rag-api:
       version: '0.0.1'
       routes:
-        # Basic search endpoint
-        - method: POST
-          path: /search
-          binding:
-            type: default
-            componentName: golem-rust:rag
-            response: |
-              let query: string = request.body.query;
-              let limit = request.body.limit;
-              let threshold = request.body.threshold;
-              let agent = search-agent();
-              let results = agent.search(query, limit, threshold);
-              { status: 200, body: { results: results } }
-
-        # Search with filters endpoint
-        - method: POST
-          path: /search/filters
-          binding:
-            type: default
-            componentName: golem-rust:rag
-            response: |
-              let query: string = request.body.query;
-              let filters = request.body.filters;
-              let limit: option<u64> = request.body.limit;
-              let threshold: option<f32> = request.body.threshold;
-              let agent = search-agent();
-              let results = agent.search-with-filters(query, filters, limit, threshold);
-              { status: 200, body: { results: results } }
-
         # Find similar documents endpoint
         - method: POST
           path: /search/similar
@@ -50,23 +21,47 @@ httpApi:
               let document_id: string = request.body.document_id;
               let limit: option<u64> = request.body.limit;
               let agent = search-agent();
-              let results = agent.find-similar-documents(document_id, limit);
-              { status: 200, body: { results: results } }
+              let result = agent.find-similar-documents(document_id, limit);
+              match result {
+                ok(r) => { status: 200, body: ok(r)  },         
+                err(e) => { status: 400, body: err({ error: e }) }
+              }
+
+        # Search endpoint
+        - method: POST
+          path: /search
+          binding:
+            type: default
+            componentName: golem-rust:rag
+            response: |
+              let query: string = request.body.query;
+              let filters = request.body.filters;
+              let limit: option<u64> = request.body.limit;
+              let threshold: option<f32> = request.body.threshold;
+              let config = request.body.config;
+              let agent = search-agent();
+              let result = agent.search(query, filters, limit, threshold, config);            
+              match result {
+                ok(r) => { status: 200, body: ok(r)  },         
+                err(e) => { status: 400, body: err({ error: e }) }
+              }
+              
 
         # Document management endpoints
-#        - method: GET
-#          path: /documents/{document_id}
-#          binding:
-#            type: default
-#            componentName: golem-rust:rag
-#            response: |
-#              let document_id: string = request.path.document_id;
-#              let agent = document-agent();
-#              let document = agent.get-document(document_id);
-#              match document {
-#                Some(doc) => { status: 200, body: { document: doc } },
-#                None => { status: 404, body: { error: "Document not found" } }
-#              }
+        - method: GET
+          path: /documents/{document_id}
+          binding:
+            type: default
+            componentName: golem-rust:rag
+            response: |
+              let document_id: string = request.path.document_id;
+              let agent = document-agent();
+              let document = agent.get-document(document_id);
+              match document {
+                ok(some(doc)) => { status: 200, body: ok(doc)  },          
+                ok(none) => { status: 404, body: err({ error: "Document not found" }) },
+                err(e) => { status: 400, body: err({ error: e }) }
+              }
 #
 #        - method: GET
 #          path: /documents
@@ -81,27 +76,27 @@ httpApi:
 #              { status: 200, body: { documents: documents } }
 
         # S3 document loading endpoints
-        - method: POST
-          path: /s3/load/{namespace}
-          binding:
-            type: default
-            componentName: golem-rust:rag
-            response: |
-              let namespace: string = request.path.namespace;
-              let agent = s3-document-loader-agent();
-              let document_ids = agent.load-documents-from-namespace(namespace);
-              { status: 200, body: { loaded_documents: document_ids } }
-
-        - method: GET
-          path: /s3/list/{namespace}
-          binding:
-            type: default
-            componentName: golem-rust:rag
-            response: |
-              let namespace: string = request.path.namespace;
-              let agent = s3-document-loader-agent();
-              let documents = agent.list-namespace-documents(namespace);
-              { status: 200, body: { documents: documents } }
+#        - method: POST
+#          path: /s3/load/{namespace}
+#          binding:
+#            type: default
+#            componentName: golem-rust:rag
+#            response: |
+#              let namespace: string = request.path.namespace;
+#              let agent = s3-document-loader-agent();
+#              let document_ids = agent.load-documents-from-namespace(namespace);
+#              { status: 200, body: { loaded_documents: document_ids } }
+#
+#        - method: GET
+#          path: /s3/list/{namespace}
+#          binding:
+#            type: default
+#            componentName: golem-rust:rag
+#            response: |
+#              let namespace: string = request.path.namespace;
+#              let agent = s3-document-loader-agent();
+#              let documents = agent.list-namespace-documents(namespace);
+#              { status: 200, body: { documents: documents } }
 
         # Embedding generation endpoints
         - method: POST
@@ -128,7 +123,7 @@ httpApi:
 
   deployments:
     local:
-      - domain: golem-rag-rust.localhost:9006
+      - domain: localhost:9006
         definitions:
           - golem-rust-rag-api
 

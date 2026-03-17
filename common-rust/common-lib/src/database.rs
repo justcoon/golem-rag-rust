@@ -2,6 +2,7 @@ use crate::models::*;
 use anyhow::Result;
 use golem_rust::Schema;
 use serde::{Deserialize, Serialize};
+use std::str::FromStr;
 use try_match::try_match;
 
 // Re-export Golem RDBMS types for convenience
@@ -202,12 +203,7 @@ impl DatabaseHelper {
         document_id: &str,
         status: &EmbeddingStatus,
     ) -> Result<()> {
-        let status_str = match status {
-            EmbeddingStatus::NotProcessed => "not_processed".to_string(),
-            EmbeddingStatus::InProgress => "in_progress".to_string(),
-            EmbeddingStatus::Completed { chunk_count } => format!("completed:{}", chunk_count),
-            EmbeddingStatus::Failed { error } => format!("failed:{}", error),
-        };
+        let status_str = status.to_string();
 
         self.connection .execute(
             "UPDATE document_embeddings SET embedding_status = $1, updated_at = NOW() WHERE document_id = $2",
@@ -235,25 +231,8 @@ impl DatabaseHelper {
             try_match!(&row.values[0], PostgresDbValue::Text(status) => status.clone())
                 .map_err(|_| anyhow::anyhow!("Invalid status type"))?;
 
-        if status_str.starts_with("completed:") {
-            let chunk_count = status_str
-                .split(':')
-                .nth(1)
-                .and_then(|s: &str| s.parse::<usize>().ok())
-                .unwrap_or(0);
-            Ok(EmbeddingStatus::Completed { chunk_count })
-        } else if status_str.starts_with("failed:") {
-            let error = status_str
-                .split(':')
-                .nth(1)
-                .unwrap_or("Unknown error")
-                .to_string();
-            Ok(EmbeddingStatus::Failed { error })
-        } else if status_str == "in_progress" {
-            Ok(EmbeddingStatus::InProgress)
-        } else {
-            Ok(EmbeddingStatus::NotProcessed)
-        }
+        EmbeddingStatus::from_str(&status_str)
+            .map_err(|e| anyhow::anyhow!("Failed to parse embedding status: {}", e))
     }
 
     pub fn store_embedding(&self, embedding: &Embedding) -> Result<()> {
@@ -272,7 +251,7 @@ impl DatabaseHelper {
                 PostgresDbValue::Int4(0), // chunk_index - will need to be updated
                 PostgresDbValue::Text("chunk_text_placeholder".to_string()), // chunk_text placeholder
                 PostgresDbValue::Array(vector_params),
-                PostgresDbValue::Text("completed".to_string()), // embedding_status
+                PostgresDbValue::Text(EmbeddingStatus::InProgress.to_string()), // embedding_status - processing individual embedding
                 PostgresDbValue::Text(embedding.created_at.clone()),
                 PostgresDbValue::Text(embedding.created_at.clone()), // updated_at same as created_at
             ],

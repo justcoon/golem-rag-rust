@@ -40,6 +40,43 @@ pub enum EmbeddingStatus {
     Failed { error: String },
 }
 
+impl std::str::FromStr for EmbeddingStatus {
+    type Err = String;
+
+    fn from_str(status_str: &str) -> Result<Self, Self::Err> {
+        if status_str.starts_with("completed:") {
+            let chunk_count = status_str
+                .split(':')
+                .nth(1)
+                .and_then(|s: &str| s.parse::<usize>().ok())
+                .unwrap_or(0);
+            Ok(EmbeddingStatus::Completed { chunk_count })
+        } else if status_str.starts_with("failed:") {
+            let error = status_str
+                .split(':')
+                .nth(1)
+                .unwrap_or("Unknown error")
+                .to_string();
+            Ok(EmbeddingStatus::Failed { error })
+        } else if status_str == "in_progress" {
+            Ok(EmbeddingStatus::InProgress)
+        } else {
+            Ok(EmbeddingStatus::NotProcessed)
+        }
+    }
+}
+
+impl std::fmt::Display for EmbeddingStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            EmbeddingStatus::NotProcessed => write!(f, "not_processed"),
+            EmbeddingStatus::InProgress => write!(f, "in_progress"),
+            EmbeddingStatus::Completed { chunk_count } => write!(f, "completed:{}", chunk_count),
+            EmbeddingStatus::Failed { error } => write!(f, "failed:{}", error),
+        }
+    }
+}
+
 #[derive(Clone, Debug, Schema, Serialize, Deserialize)]
 pub struct ChunkConfig {
     pub chunk_size: u32,
@@ -140,8 +177,36 @@ pub struct DocumentFilters {
     pub date_range: Option<DateRange>,
 }
 
-// Use existing SearchResult and SearchFilters from above
-pub type HybridSearchResult = SearchResult;
+#[derive(Clone, Debug, Schema, Serialize, Deserialize)]
+pub struct HybridSearchResult {
+    pub chunk: DocumentChunk,
+    pub semantic_score: f32,
+    pub keyword_score: f32,
+    pub combined_score: f32,
+    pub match_type: MatchType,
+    pub relevance_explanation: Option<String>,
+}
+
+#[derive(Clone, Debug, Schema, Serialize, Deserialize)]
+pub struct HybridSearchConfig {
+    pub semantic_weight: f32,  // Weight for semantic search (0.0-1.0)
+    pub keyword_weight: f32,   // Weight for keyword search (0.0-1.0)
+    pub rrf_k: f32,            // Reciprocal Rank Fusion parameter
+    pub enable_semantic: bool, // Enable semantic search
+    pub enable_keyword: bool,  // Enable keyword search
+}
+
+impl Default for HybridSearchConfig {
+    fn default() -> Self {
+        Self {
+            semantic_weight: 0.7,
+            keyword_weight: 0.3,
+            rrf_k: 60.0,
+            enable_semantic: true,
+            enable_keyword: true,
+        }
+    }
+}
 
 #[derive(Clone, Debug, Schema, Serialize, Deserialize)]
 pub enum MatchType {

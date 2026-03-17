@@ -9,37 +9,32 @@ pub type AgentResult<T> = std::result::Result<T, String>;
 pub trait SearchAgent {
     fn new() -> Self;
 
-    /// Search for documents using semantic similarity
-    ///
-    /// # Arguments
-    /// * `query` - Search query text
-    /// * `limit` - Maximum number of results to return (default: 10)
-    /// * `threshold` - Similarity threshold (0.0 to 1.0, default: 0.7)
-    ///
-    /// # Returns
-    /// List of search results with relevance scores
-    async fn search(
-        &self,
-        query: String,
-        limit: Option<usize>,
-        threshold: Option<f32>,
-    ) -> AgentResult<Vec<SearchResult>>;
-
-    /// Search documents with metadata filters
-    async fn search_with_filters(
-        &self,
-        query: String,
-        filters: SearchFilters,
-        limit: Option<usize>,
-        threshold: Option<f32>,
-    ) -> AgentResult<Vec<SearchResult>>;
-
     /// Get similar documents to a specific document
     async fn find_similar_documents(
         &self,
         document_id: String,
         limit: Option<usize>,
     ) -> AgentResult<Vec<SearchResult>>;
+
+    /// Search for documents using semantic and/or keyword search
+    ///
+    /// # Arguments
+    /// * `query` - Search query text
+    /// * `filters` - Optional metadata filters
+    /// * `limit` - Maximum number of results to return (default: 10)
+    /// * `threshold` - Similarity threshold (0.0 to 1.0, default: 0.7)
+    /// * `config` - Search configuration (optional, uses defaults)
+    ///
+    /// # Returns
+    /// List of search results with combined relevance scores
+    async fn search(
+        &self,
+        query: String,
+        filters: Option<SearchFilters>,
+        limit: Option<usize>,
+        threshold: Option<f32>,
+        config: Option<HybridSearchConfig>,
+    ) -> AgentResult<Vec<HybridSearchResult>>;
 }
 
 struct SearchAgentImpl {
@@ -52,69 +47,6 @@ impl SearchAgent for SearchAgentImpl {
         let db_config =
             PostgresDbConfig::from_env().expect("Failed to load PostgresDbConfig from environment");
         Self { db_config }
-    }
-
-    async fn search(
-        &self,
-        query: String,
-        limit: Option<usize>,
-        threshold: Option<f32>,
-    ) -> AgentResult<Vec<SearchResult>> {
-        log::info!("Performing semantic search for query: {}", query);
-
-        let db_helper: DatabaseHelper = match DatabaseHelper::new(&self.db_config.db_url()) {
-            Ok(helper) => helper,
-            Err(e) => {
-                log::error!("Failed to create database helper: {:?}", e);
-                return Err(format!("Failed to create database helper: {:?}", e));
-            }
-        };
-
-        let limit = limit.unwrap_or(10);
-        let threshold = threshold.unwrap_or(0.7);
-
-        let query_embedding = self.generate_query_embedding(&query).await?;
-        let results = self.vector_similarity_search(
-            &db_helper,
-            &query_embedding,
-            &query,
-            limit,
-            threshold,
-            None,
-        )?;
-
-        Ok(results)
-    }
-
-    async fn search_with_filters(
-        &self,
-        query: String,
-        filters: SearchFilters,
-        limit: Option<usize>,
-        threshold: Option<f32>,
-    ) -> AgentResult<Vec<SearchResult>> {
-        log::info!("Performing filtered search for query: {}", query);
-
-        let db_helper: DatabaseHelper = match DatabaseHelper::new(&self.db_config.db_url()) {
-            Ok(helper) => helper,
-            Err(e) => return Err(format!("Failed to create database helper: {:?}", e)),
-        };
-
-        let limit = limit.unwrap_or(10);
-        let threshold = threshold.unwrap_or(0.7);
-
-        let query_embedding = self.generate_query_embedding(&query).await?;
-        let filter_conditions = self.build_filter_conditions(&filters);
-        let results = self.vector_similarity_search(
-            &db_helper,
-            &query_embedding,
-            &query,
-            limit,
-            threshold,
-            Some(&filter_conditions),
-        )?;
-
-        Ok(results)
     }
 
     async fn find_similar_documents(
@@ -150,6 +82,59 @@ impl SearchAgent for SearchAgentImpl {
 
         Ok(filtered_results)
     }
+
+    async fn search(
+        &self,
+        query: String,
+        filters: Option<SearchFilters>,
+        limit: Option<usize>,
+        threshold: Option<f32>,
+        config: Option<HybridSearchConfig>,
+    ) -> AgentResult<Vec<HybridSearchResult>> {
+        log::info!("Performing search for query: {}", query);
+
+        let db_helper: DatabaseHelper = match DatabaseHelper::new(&self.db_config.db_url()) {
+            Ok(helper) => helper,
+            Err(e) => {
+                log::error!("Failed to create database helper: {:?}", e);
+                return Err(format!("Failed to create database helper: {:?}", e));
+            }
+        };
+
+        let limit = limit.unwrap_or(10);
+        let threshold = threshold.unwrap_or(0.7);
+        let config = config.unwrap_or_default();
+
+        let mut semantic_results = Vec::new();
+        let mut keyword_results = Vec::new();
+
+        // Prepare filter conditions if provided
+        let filter_conditions = filters.as_ref().map(|f| self.build_filter_conditions(f));
+        let filter_conditions_ref = filter_conditions.as_deref();
+
+        // Perform semantic search if enabled
+        if config.enable_semantic {
+            let query_embedding = self.generate_query_embedding(&query).await?;
+            semantic_results = self.vector_similarity_search(
+                &db_helper,
+                &query_embedding,
+                &query,
+                limit,
+                threshold,
+                filter_conditions_ref,
+            )?;
+        }
+
+        // Perform keyword search if enabled
+        if config.enable_keyword {
+            keyword_results = self.keyword_search(&db_helper, &query, limit, filters.as_ref())?;
+        }
+
+        // Fuse results using Reciprocal Rank Fusion (RRF)
+        let fused_results = self.fuse_results(semantic_results, keyword_results, &config)?;
+
+        Ok(fused_results)
+    }
 }
 
 impl SearchAgentImpl {
@@ -157,7 +142,7 @@ impl SearchAgentImpl {
         &self,
         row: &PostgresDbRow,
         query: &str,
-        threshold: f32,
+        threshold: Option<f32>,
     ) -> AgentResult<Option<SearchResult>> {
         let chunk_id = try_match!(&row.values[0], PostgresDbValue::Text(id) => id.clone())
             .map_err(|_| "Invalid chunk ID type".to_string())?;
@@ -181,28 +166,30 @@ impl SearchAgentImpl {
             _other => 0.0,
         };
 
-        // Filter by threshold
-        if similarity_score >= threshold {
-            let document_chunk = DocumentChunk {
-                id: chunk_id,
-                document_id: document_id.clone(),
-                content: chunk_text.clone(),
-                chunk_index,
-                start_pos,
-                end_pos,
-                token_count,
-            };
-
-            let search_result = SearchResult {
-                chunk: document_chunk,
-                similarity_score,
-                relevance_explanation: self.generate_highlight(&chunk_text, query),
-            };
-
-            Ok(Some(search_result))
-        } else {
-            Ok(None)
+        // Filter by threshold if provided
+        if let Some(threshold) = threshold {
+            if similarity_score < threshold {
+                return Ok(None);
+            }
         }
+
+        let document_chunk = DocumentChunk {
+            id: chunk_id,
+            document_id: document_id.clone(),
+            content: chunk_text.clone(),
+            chunk_index,
+            start_pos,
+            end_pos,
+            token_count,
+        };
+
+        let search_result = SearchResult {
+            chunk: document_chunk,
+            similarity_score,
+            relevance_explanation: self.generate_highlight(&chunk_text, query),
+        };
+
+        Ok(Some(search_result))
     }
 
     async fn generate_query_embedding(&self, query: &str) -> AgentResult<Vec<f32>> {
@@ -282,7 +269,9 @@ impl SearchAgentImpl {
         let mut search_results = Vec::new();
 
         for row in result.rows {
-            if let Some(result) = self.extract_search_result_from_row(&row, query, threshold)? {
+            if let Some(result) =
+                self.extract_search_result_from_row(&row, query, Some(threshold))?
+            {
                 search_results.push(result);
             }
         }
@@ -296,7 +285,7 @@ impl SearchAgentImpl {
         document_id: &str,
     ) -> AgentResult<Vec<f32>> {
         let query = r#"
-            SELECT e.embedding
+            SELECT e.embedding::float8[]
             FROM document_embeddings e
             WHERE e.document_id = $1 AND e.embedding_status LIKE 'completed%'
             LIMIT 1
@@ -400,5 +389,125 @@ impl SearchAgentImpl {
         } else {
             None
         }
+    }
+
+    fn keyword_search(
+        &self,
+        db_helper: &DatabaseHelper,
+        query: &str,
+        limit: usize,
+        filters: Option<&SearchFilters>,
+    ) -> AgentResult<Vec<SearchResult>> {
+        let filter_conditions = filters
+            .map(|f| self.build_filter_conditions(f))
+            .unwrap_or_else(|| "1=1".to_string());
+
+        // Use PostgreSQL full-text search with tsvector and tsquery
+        let sql_query = format!(
+            r#"
+            SELECT 
+                dc.id as chunk_id,
+                dc.document_id,
+                dc.chunk_index,
+                dc.content as chunk_text,
+                dc.start_pos,
+                dc.end_pos,
+                dc.token_count,
+                ts_rank_cd(to_tsvector('english', dc.content), plainto_tsquery('english', $1)) as keyword_score
+            FROM document_chunks dc
+            WHERE {}
+              AND to_tsvector('english', dc.content) @@ plainto_tsquery('english', $1)
+            ORDER BY keyword_score DESC
+            LIMIT $2
+            "#,
+            filter_conditions
+        );
+
+        let result = db_helper
+            .connection
+            .query(
+                &sql_query,
+                vec![
+                    PostgresDbValue::Text(query.to_string()),
+                    PostgresDbValue::Int4(limit as i32),
+                ],
+            )
+            .map_err(|e| format!("Failed to execute keyword search query: {:?}", e))?;
+
+        let mut search_results = Vec::new();
+
+        for row in result.rows {
+            if let Some(result) = self.extract_search_result_from_row(&row, query, None)? {
+                search_results.push(result);
+            }
+        }
+
+        Ok(search_results)
+    }
+
+    fn fuse_results(
+        &self,
+        semantic_results: Vec<SearchResult>,
+        keyword_results: Vec<SearchResult>,
+        config: &HybridSearchConfig,
+    ) -> AgentResult<Vec<HybridSearchResult>> {
+        let mut fused_results = std::collections::HashMap::new();
+
+        // Process semantic results
+        for (rank, result) in semantic_results.iter().enumerate() {
+            let chunk_id = &result.chunk.id;
+            let semantic_rrf_score = 1.0 / (config.rrf_k + (rank + 1) as f32);
+
+            fused_results.insert(
+                chunk_id.clone(),
+                HybridSearchResult {
+                    chunk: result.chunk.clone(),
+                    semantic_score: result.similarity_score,
+                    keyword_score: 0.0,
+                    combined_score: semantic_rrf_score * config.semantic_weight,
+                    match_type: MatchType::SemanticOnly,
+                    relevance_explanation: result.relevance_explanation.clone(),
+                },
+            );
+        }
+
+        // Process keyword results
+        for (rank, result) in keyword_results.iter().enumerate() {
+            let chunk_id = &result.chunk.id;
+            let keyword_rrf_score = 1.0 / (config.rrf_k + (rank + 1) as f32);
+
+            if let Some(existing) = fused_results.get_mut(chunk_id) {
+                // Update existing result with keyword score
+                existing.keyword_score = result.similarity_score;
+                existing.combined_score += keyword_rrf_score * config.keyword_weight;
+                existing.match_type = MatchType::BothMatch;
+                if existing.relevance_explanation.is_none() {
+                    existing.relevance_explanation = result.relevance_explanation.clone();
+                }
+            } else {
+                // Add new keyword-only result
+                fused_results.insert(
+                    chunk_id.clone(),
+                    HybridSearchResult {
+                        chunk: result.chunk.clone(),
+                        semantic_score: 0.0,
+                        keyword_score: result.similarity_score,
+                        combined_score: keyword_rrf_score * config.keyword_weight,
+                        match_type: MatchType::KeywordOnly,
+                        relevance_explanation: result.relevance_explanation.clone(),
+                    },
+                );
+            }
+        }
+
+        // Convert to sorted vector
+        let mut results: Vec<HybridSearchResult> = fused_results.into_values().collect();
+        results.sort_by(|a, b| {
+            b.combined_score
+                .partial_cmp(&a.combined_score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+
+        Ok(results)
     }
 }
