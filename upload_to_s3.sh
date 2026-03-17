@@ -11,11 +11,12 @@ else
 fi
 
 # Configuration (will be overridden by .env if available)
-S3_ENDPOINT="http://localhost:${RUSTFS_PORT:-9000}"
-S3_BUCKET="${RUSTFS_BUCKET:-golem-documents}"
-S3_ACCESS_KEY="${RUSTFS_ACCESS_KEY:-rustfsadmin}"
-S3_SECRET_KEY="${RUSTFS_SECRET_KEY:-rustfsadmin123}"
-S3_REGION="${RUSTFS_REGION:-us-east-1}"
+S3_PORT="${S3_PORT:-9000}"
+S3_ENDPOINT="http://localhost:$S3_PORT"
+S3_BUCKET="${AWS_S3_BUCKET:-golem-documents}"
+S3_ACCESS_KEY="${AWS_ACCESS_KEY_ID:-rustfsadmin}"
+S3_SECRET_KEY="${AWS_SECRET_ACCESS_KEY:-rustfsadmin123}"
+S3_REGION="${AWS_DEFAULT_REGION:-us-east-1}"
 
 # Data directory (default: data or from .env)
 DATA_DIR="${1:-${DATA_DIR:-data}}"
