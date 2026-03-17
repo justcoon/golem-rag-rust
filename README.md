@@ -7,7 +7,7 @@ A comprehensive Retrieval-Augmented Generation (RAG) system built on Golem Cloud
 - **Hybrid Search**: Combines semantic (vector embeddings) and keyword (full-text) search using Reciprocal Rank Fusion (RRF)
 - **Document Management**: Store, retrieve, and manage documents with metadata
 - **Embedding Generation**: Automatic vector embeddings for documents with multiple provider support
-- **S3 Integration**: Load documents directly from S3 buckets with namespace organization (⚠️ partially implemented)
+- **S3 Integration**: Load documents directly from S3 buckets with namespace organization
 - **RESTful API**: HTTP endpoints for all operations
 - **PostgreSQL Backend**: Persistent storage with vector search capabilities (pgvector)
 
@@ -54,13 +54,11 @@ Individual document embedding processor:
 ### S3DocumentLoaderAgent
 S3 integration for document loading:
 
-**⚠️ Note**: This feature is **not completed** due to current issues with the S3Client implementation.
-
 **Methods:**
 - `load_documents_from_namespace(namespace)` - Load documents from S3 namespace
 - `list_namespace_documents(namespace)` - List available documents in namespace
 
-**Status**: Implementation exists but S3Client integration needs to be completed for full functionality.
+**Note**: Uses the `NAMESPACE` parameter to look for files under the `{namespace}/` prefix in the S3 bucket.
 
 ## Architecture
 
@@ -117,12 +115,11 @@ POSTGRES_USER=postgres
 POSTGRES_PASSWORD=password
 POSTGRES_PORT=5432
 
-# S3 (optional - not fully implemented)
-AWS_ACCESS_KEY_ID=your_key
-AWS_SECRET_ACCESS_KEY=your_secret
-AWS_S3_BUCKET=your_bucket
-S3_ENDPOINT_URL=https://s3.amazonaws.com
-# Note: S3DocumentLoaderAgent exists but S3Client implementation needs completion
+# S3 (RustFS)
+AWS_ACCESS_KEY_ID=rustfsadmin
+AWS_SECRET_ACCESS_KEY=rustfsadmin123
+AWS_S3_BUCKET=golem-documents
+S3_ENDPOINT_URL=http://localhost:9000
 
 # Embedding Provider
 EMBEDDING_PROVIDER=openai
@@ -147,19 +144,34 @@ docker-compose up -d
 
 ### Loading Documents
 
-Optionally load documents from local files to PostgreSQL:
-
+#### 1. Via Local Files to PostgreSQL
+Load documents from local files directly to the PostgreSQL database:
 ```bash
-# Load documents from data directory to database
 ./load_to_postgres.sh data/
-
-# Script features:
-# - Automatic content type detection (md, txt, pdf, html, json)
-# - Document ID generation using MD5 hash
-# - Metadata creation with timestamps
-# - Database statistics and recent documents summary
-# - Error handling and progress reporting
 ```
+
+#### 2. Via S3 (RustFS)
+Load documents from an S3-compatible storage like RustFS using namespaces:
+
+**Step A: Upload documents to S3**
+```bash
+# Usage: ./upload_to_s3.sh [data_directory] [namespace]
+./upload_to_s3.sh data/ samp
+```
+
+**Step B: Trigger document loading in the agent**
+```bash
+golem agent invoke 's3-document-loader-agent()' \
+  'golem-rust:rag/s3-document-loader-agent.{load-documents-from-namespace}' \
+  '"samp"'
+```
+
+**Features:**
+- Automatic content type detection (md, txt, pdf, html, json)
+- Document ID generation using MD5 hash
+- Metadata creation with timestamps
+- Support for S3 namespaces (prefixes)
+- Robust XML parsing for S3 metadata extraction
 
 ### Building and Running
 

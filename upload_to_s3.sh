@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Upload script for RustFS S3-compatible storage
-# Usage: ./upload_to_s3.sh [data_directory]
+# Usage: ./upload_to_s3.sh [data_directory] [namespace]
 
 # Load environment variables from .env file
 if [ -f .env ]; then
@@ -19,11 +19,15 @@ S3_REGION="${RUSTFS_REGION:-us-east-1}"
 
 # Data directory (default: data or from .env)
 DATA_DIR="${1:-${DATA_DIR:-data}}"
+NAMESPACE="${2}"
 
 echo "Uploading files to RustFS S3 storage..."
 echo "Endpoint: $S3_ENDPOINT"
 echo "Bucket: $S3_BUCKET"
 echo "Data Directory: $DATA_DIR"
+if [ -n "$NAMESPACE" ]; then
+    echo "Namespace: $NAMESPACE"
+fi
 echo
 
 # Check if data directory exists
@@ -68,9 +72,17 @@ success_count=0
 for file in "$DATA_DIR"/*; do
     if [ -f "$file" ]; then
         filename=$(basename "$file")
-        echo "Uploading: $filename"
         
-        if aws s3 cp "$file" "s3://$S3_BUCKET/$filename" --endpoint-url "$S3_ENDPOINT"; then
+        # Determine upload path
+        if [ -n "$NAMESPACE" ]; then
+            DEST_PATH="s3://$S3_BUCKET/$NAMESPACE/$filename"
+        else
+            DEST_PATH="s3://$S3_BUCKET/$filename"
+        fi
+        
+        echo "Uploading: $filename to $DEST_PATH"
+        
+        if aws s3 cp "$file" "$DEST_PATH" --endpoint-url "$S3_ENDPOINT"; then
             echo "✓ Successfully uploaded: $filename"
             ((success_count++))
         else
@@ -89,7 +101,7 @@ echo "Failed uploads: $((file_count - success_count))"
 # List uploaded files
 echo
 echo "Files in bucket:"
-aws s3 ls "s3://$S3_BUCKET" --endpoint-url "$S3_ENDPOINT" --human-readable
+aws s3 ls "s3://$S3_BUCKET" --endpoint-url "$S3_ENDPOINT" --human-readable --recursive
 
 if [ $success_count -eq $file_count ]; then
     echo "All files uploaded successfully!"

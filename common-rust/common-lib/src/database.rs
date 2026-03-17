@@ -106,7 +106,7 @@ impl DatabaseHelper {
 
         self.connection .execute(
             "INSERT INTO documents (id, title, content, metadata, created_at, updated_at, tags, source, namespace, size_bytes) 
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)",
+             VALUES ($1, $2, $3, $4, $5::timestamptz, $6::timestamptz, $7, $8, $9, $10)",
             vec![
                 PostgresDbValue::Text(document_id.clone()),
                 PostgresDbValue::Text(document.title.clone()),
