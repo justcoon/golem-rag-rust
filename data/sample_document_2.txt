@@ -1,0 +1,25 @@
+Rust Programming Language Guide
+
+Rust is a systems programming language that runs blazingly fast, prevents segfaults, and guarantees thread safety. It was originally developed by Mozilla and has gained significant popularity in recent years.
+
+Key Features of Rust:
+- Memory safety without garbage collection
+- Concurrency without data races
+- Zero-cost abstractions
+- Pattern matching
+- Type inference
+- Minimal runtime
+- Efficient C bindings
+
+Rust's ownership system is its most unique feature, ensuring memory safety without needing a garbage collector. The compiler enforces rules that prevent common bugs like null pointer dereferences and buffer overflows.
+
+Common use cases for Rust:
+- Operating systems
+- Web browsers (components of Firefox)
+- Game engines
+- Embedded systems
+- WebAssembly applications
+- Blockchain and cryptocurrency systems
+- High-performance web servers
+
+The Rust community is known for being welcoming and supportive, with excellent documentation and a growing ecosystem of crates (libraries).

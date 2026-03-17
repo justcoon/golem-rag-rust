@@ -1,1 +1,348 @@
-# golem-rag-rust
+# Golem RAG System (Rust Implementation)
+
+A comprehensive Retrieval-Augmented Generation (RAG) system built on Golem Cloud v1.4.2, featuring hybrid search capabilities, document management, and embedding generation.
+
+## Features
+
+- **Hybrid Search**: Combines semantic (vector embeddings) and keyword (full-text) search using Reciprocal Rank Fusion (RRF)
+- **Document Management**: Store, retrieve, and manage documents with metadata
+- **Embedding Generation**: Automatic vector embeddings for documents with multiple provider support
+- **S3 Integration**: Load documents directly from S3 buckets with namespace organization (⚠️ partially implemented)
+- **RESTful API**: HTTP endpoints for all operations
+- **PostgreSQL Backend**: Persistent storage with vector search capabilities (pgvector)
+
+## Available Agents
+
+### SearchAgent
+The core search agent providing multiple search strategies:
+
+**Methods:**
+- `find_similar_documents(document_id, limit?)` - Find similar documents by ID
+- `search(query, filters?, limit?, threshold?, config?)` - Search combining semantic and/or keyword search
+
+**Search Features:**
+- Configurable semantic vs keyword weights
+- Reciprocal Rank Fusion (RRF) for result combination
+- Match type detection (semantic-only, keyword-only, or both)
+- Support for all existing metadata filters
+- **Pure semantic search**: Set `enable_keyword = false` in config
+- **Pure keyword search**: Set `enable_semantic = false` in config
+
+### DocumentAgent
+Document storage and retrieval management:
+
+**Methods:**
+- `get_document(document_id)` - Retrieve complete document
+- `get_document_metadata(document_id)` - Get document metadata only
+- `list_documents(filters?, limit?)` - List documents with optional filtering
+
+### EmbeddingGeneratorAgent
+High-level batch processing coordinator for embeddings:
+
+**Methods:**
+- `generate_embeddings_for_documents(document_ids)` - Generate embeddings for multiple documents in parallel
+- `generate_embeddings_for_all_documents()` - Find and process all documents without embeddings
+
+### DocumentEmbeddingGeneratorAgent  
+Individual document embedding processor:
+
+**Methods:**
+- `generate_embeddings_for_document(document_id)` - Generate embeddings for a single document
+- `remove_embeddings_for_document(document_id)` - Remove all embeddings for a document
+- `get_embedding_status(document_id)` - Check embedding generation status
+
+### S3DocumentLoaderAgent
+S3 integration for document loading:
+
+**⚠️ Note**: This feature is **not completed** due to current issues with the S3Client implementation.
+
+**Methods:**
+- `load_documents_from_namespace(namespace)` - Load documents from S3 namespace
+- `list_namespace_documents(namespace)` - List available documents in namespace
+
+**Status**: Implementation exists but S3Client integration needs to be completed for full functionality.
+
+## Architecture
+
+```
+┌─────────────────┐
+│   HTTP API      │
+│   (golem.yaml)  │
+└─────────┬───────┘
+          │
+    ┌─────┼─────┐
+    ▼           ▼           
+┌─────────┐ ┌─────────┐ ┌─────────┐
+│Search   │ │Document │ │Embedding│
+│Agent    │ │Agent    │ │Generator│
+└────┬────┘ └────┬────┘ └────┬────┘
+     │           │           │
+     └─────────┬─┘   ┌───────┘
+               │     │
+               |     ▼
+    ┌─────────┐| ┌─────────┐
+    │S3Doc    │| │Document │
+    │Loader   │| │Embedding│
+    │Agent    │| │Generator│
+    └────┬────┘| └────┬────┘
+         │     |      │
+         └─────┬──────┘
+               │
+               ▼
+        ┌─────────────┐
+        │ PostgreSQL  │
+        │ + pgvector  │
+        └─────────────┘
+```
+
+## Quick Start
+
+### Prerequisites
+
+- Rust with `wasm32-wasip1` target: `rustup target add wasm32-wasip1`
+- `cargo-component` version 0.21.1: `cargo install --force cargo-component@0.21.1`
+- Golem CLI (`golem`) v1.4.2: download from https://github.com/golemcloud/golem/releases
+- Docker and Docker Compose
+- S3 bucket (optional, for document loading)
+
+### Environment Setup
+
+Copy `.env.example` to `.env` and configure:
+
+```bash
+# Database
+POSTGRES_HOST=localhost
+POSTGRES_DB=rag_db
+POSTGRES_USER=postgres
+POSTGRES_PASSWORD=password
+POSTGRES_PORT=5432
+
+# S3 (optional - not fully implemented)
+AWS_ACCESS_KEY_ID=your_key
+AWS_SECRET_ACCESS_KEY=your_secret
+AWS_S3_BUCKET=your_bucket
+S3_ENDPOINT_URL=https://s3.amazonaws.com
+# Note: S3DocumentLoaderAgent exists but S3Client implementation needs completion
+
+# Embedding Provider
+EMBEDDING_PROVIDER=openai
+EMBEDDING_API_KEY=your_api_key
+EMBEDDING_MODEL=text-embedding-3-small
+```
+
+### Infrastructure Setup
+
+Start the complete infrastructure using Docker Compose:
+
+```bash
+# Start all services (database, storage, and embeddings)
+docker-compose up -d
+
+# This includes:
+# - PostgreSQL with pgvector extension and automatic migrations
+# - RustFS S3-compatible storage for document loading
+# - Ollama for local embedding generation
+# - Automatic setup of buckets and embedding models
+```
+
+### Loading Documents
+
+Optionally load documents from local files to PostgreSQL:
+
+```bash
+# Load documents from data directory to database
+./load_to_postgres.sh data/
+
+# Script features:
+# - Automatic content type detection (md, txt, pdf, html, json)
+# - Document ID generation using MD5 hash
+# - Metadata creation with timestamps
+# - Database statistics and recent documents summary
+# - Error handling and progress reporting
+```
+
+### Building and Running
+
+```bash
+# Build all components
+golem build
+
+# Deploy locally
+golem deploy golem.yaml
+
+# Test the API (search)
+curl -X POST http://localhost:9006/search \
+  -H "Content-Type: application/json" \
+  -d '{"query": "quantum computing", "limit": 5}'
+```
+
+## API Endpoints
+
+### Search Operations
+
+```bash
+# Search (primary search method)
+POST /search
+{
+  "query": "artificial intelligence ethics",
+  "filters": {
+    "content_types": ["Text", "Markdown"]
+  },
+  "limit": 10,
+  "threshold": 0.7,
+  "config": {
+    "semantic_weight": 0.7,
+    "keyword_weight": 0.3,
+    "enable_semantic": true,
+    "enable_keyword": true
+  }
+}
+
+# Pure semantic search (using search with keyword disabled)
+POST /search
+{
+  "query": "machine learning algorithms",
+  "limit": 10,
+  "threshold": 0.7,
+  "config": {
+    "enable_keyword": false,
+    "enable_semantic": true
+  }
+}
+
+# Semantic search with filters (using search)
+POST /search
+{
+  "query": "sustainable development",
+  "filters": {
+    "content_types": ["Markdown"],
+    "tags": ["environment", "climate"],
+    "sources": ["research_papers"]
+  },
+  "limit": 5,
+  "threshold": 0.8,
+  "config": {
+    "enable_keyword": false,
+    "enable_semantic": true
+  }
+}
+
+# Find similar documents
+POST /search/similar
+{
+  "document_id": "doc_123",
+  "limit": 5
+}
+```
+
+### Document Management
+
+```bash
+# Get document
+GET /documents/{document_id}
+
+# Generate embeddings
+POST /embeddings/generate/{document_id}
+
+# Check embedding status
+GET /embeddings/status/{document_id}
+```
+
+## Hybrid Search Configuration
+
+The hybrid search combines semantic and keyword search results using Reciprocal Rank Fusion (RRF):
+
+```rust
+HybridSearchConfig {
+    semantic_weight: 0.7,    // Weight for semantic search results
+    keyword_weight: 0.3,     // Weight for keyword search results  
+    rrf_k: 60.0,            // RRF parameter (higher = more rank fusion)
+    enable_semantic: true,   // Enable/disable semantic search
+    enable_keyword: true,   // Enable/disable keyword search
+}
+```
+
+### Search Result Types
+
+- **SemanticOnly**: Found only through vector similarity
+- **KeywordOnly**: Found only through full-text search
+- **BothMatch**: Found by both search methods (highest relevance)
+
+## Data Models
+
+### Document
+```rust
+Document {
+    id: String,
+    title: String,
+    content: String,
+    source: String,
+    namespace: String,
+    tags: Vec<String>,
+    metadata: DocumentMetadata,
+    // ... other fields
+}
+```
+
+### Hybrid Search Result
+```rust
+HybridSearchResult {
+    chunk: DocumentChunk,
+    semantic_score: f32,
+    keyword_score: f32,
+    combined_score: f32,
+    match_type: MatchType,
+    relevance_explanation: Option<String>,
+}
+```
+
+## Database Schema
+
+The system uses PostgreSQL with the following key tables:
+
+- `documents` - Document metadata and content
+- `document_chunks` - Text chunks for search
+- `document_embeddings` - Vector embeddings (pgvector)
+
+## Security Considerations
+
+- Environment variables for sensitive configuration
+- Database connection pooling
+- S3 access through IAM roles when possible
+- API rate limiting (configure in golem.yaml)
+
+## Development
+
+```bash
+# Run clippy and fmt
+cargo clippy --all-targets --all-features -- -D warnings
+cargo fmt --all
+
+# Run tests
+cargo test
+
+# Build all components (recommended)
+golem build
+```
+
+## Additional Documentation
+
+- [AGENTS.md](./AGENTS.md) - Detailed agent development guide
+- [EMBEDDING_OPTIONS.md](./EMBEDDING_OPTIONS.md) - Embedding provider configuration
+- [INFRA_SETUP.md](./INFRA_SETUP.md) - Infrastructure setup instructions
+
+## Contributing
+
+1. Fork the repository
+2. Create a feature branch
+3. Make your changes
+4. Run tests and linting
+5. Submit a pull request
+
+## License
+
+[Add your license here]
+
+---
+
+Built with Golem Cloud and Rust
