@@ -237,14 +237,10 @@ impl SearchAgentImpl {
         threshold: f32,
         filter_conditions: Option<&str>,
     ) -> AgentResult<Vec<SearchResult>> {
-        let embedding_str = format!(
-            "[{}]",
-            query_embedding
-                .iter()
-                .map(|x| x.to_string())
-                .collect::<Vec<_>>()
-                .join(",")
-        );
+        let embedding_array: Vec<PostgresLazyDbValue> = query_embedding
+            .iter()
+            .map(|&v| PostgresLazyDbValue::new(PostgresDbValue::Float4(v)))
+            .collect();
 
         let filters = filter_conditions.unwrap_or("1=1");
 
@@ -277,7 +273,7 @@ impl SearchAgentImpl {
                 &sql_query,
                 vec![
                     PostgresDbValue::Int4(limit as i32),
-                    PostgresDbValue::Text(embedding_str),
+                    PostgresDbValue::Array(embedding_array),
                     PostgresDbValue::Float4(threshold),
                 ],
             )
@@ -324,10 +320,11 @@ impl SearchAgentImpl {
         let embedding: Vec<f32> = embedding_array
             .iter()
             .map(|lazy_value: &PostgresLazyDbValue| match lazy_value.get() {
-                PostgresDbValue::Float4(value) => value,
-                _ => panic!("Expected Float4 in embedding array"),
+                PostgresDbValue::Float4(value) => Ok(value),
+                PostgresDbValue::Float8(value) => Ok(value as f32),
+                _ => Err("Invalid embedding type: expected Float4 or Float8".to_string()),
             })
-            .collect();
+            .collect::<Result<Vec<_>, _>>()?;
 
         Ok(embedding)
     }

@@ -1,5 +1,6 @@
 use chrono::Utc;
 use common_lib::*;
+use futures::future;
 use golem_rust::{agent_definition, agent_implementation};
 use std::string::String;
 
@@ -7,6 +8,29 @@ pub type AgentResult<T> = std::result::Result<T, String>;
 
 #[agent_definition(ephemeral)]
 pub trait EmbeddingGeneratorAgent {
+    fn new() -> Self;
+
+    /// Generate embeddings for multiple documents
+    ///
+    /// # Arguments
+    /// * `document_ids` - List of document IDs to process
+    ///
+    /// # Returns
+    /// Total number of embeddings generated across all documents
+    async fn generate_embeddings_for_documents(
+        &mut self,
+        document_ids: Vec<String>,
+    ) -> AgentResult<u32>;
+
+    /// Generate embeddings for all documents that don't have embeddings yet
+    ///
+    /// # Returns
+    /// Tuple of (document_ids_processed, total_embeddings_generated)
+    async fn generate_embeddings_for_all_documents(&mut self) -> AgentResult<(Vec<String>, u32)>;
+}
+
+#[agent_definition(ephemeral)]
+pub trait DocumentEmbeddingGeneratorAgent {
     fn new() -> Self;
 
     /// Generate and store embeddings for a specific document
@@ -29,28 +53,131 @@ pub trait EmbeddingGeneratorAgent {
 
     /// Get embedding status for a document
     async fn get_embedding_status(&self, document_id: String) -> AgentResult<EmbeddingStatus>;
+}
 
-    /// Generate embeddings for multiple documents
-    ///
-    /// # Arguments
-    /// * `document_ids` - List of document IDs to process
-    ///
-    /// # Returns
-    /// Total number of embeddings generated across all documents
+struct EmbeddingGeneratorAgentImpl;
+
+#[agent_implementation]
+impl EmbeddingGeneratorAgent for EmbeddingGeneratorAgentImpl {
+    fn new() -> Self {
+        Self
+    }
+
     async fn generate_embeddings_for_documents(
         &mut self,
         document_ids: Vec<String>,
-    ) -> AgentResult<u32>;
+    ) -> AgentResult<u32> {
+        log::info!(
+            "Generating embeddings for {} documents in parallel",
+            document_ids.len()
+        );
+
+        // Process all documents in parallel using join_all
+        let futures = document_ids.into_iter().map(|document_id| async move {
+            // Create a separate document embedding generator for each document
+            let mut doc_generator = DocumentEmbeddingGeneratorAgentImpl::new();
+
+            match doc_generator
+                .generate_embeddings_for_document(document_id.clone())
+                .await
+            {
+                Ok(count) => {
+                    log::debug!(
+                        "Successfully generated {} embeddings for document: {}",
+                        count,
+                        document_id
+                    );
+                    Some(count)
+                }
+                Err(e) => {
+                    log::error!("Failed to process document {}: {:?}", document_id, e);
+                    None
+                }
+            }
+        });
+
+        let results = future::join_all(futures).await;
+        let total_documents = results.len();
+
+        let mut total_embeddings = 0;
+        let mut processed_count = 0;
+
+        for count in results.into_iter().flatten() {
+            total_embeddings += count;
+            processed_count += 1;
+        }
+
+        log::info!(
+            "Generated total of {} embeddings for {}/{} documents",
+            total_embeddings,
+            processed_count,
+            total_documents
+        );
+        Ok(total_embeddings)
+    }
+
+    async fn generate_embeddings_for_all_documents(&mut self) -> AgentResult<(Vec<String>, u32)> {
+        log::info!("Finding all documents without embeddings");
+
+        // Create a database helper to query for documents
+        let db_config = PostgresDbConfig::from_env()
+            .map_err(|e| format!("Failed to load PostgresDbConfig from environment: {:?}", e))?;
+        let db_helper = DatabaseHelper::new(&db_config.db_url())
+            .map_err(|e| format!("Failed to create database helper: {:?}", e))?;
+
+        // Query for documents that don't have embeddings or have failed embeddings
+        let query = r#"
+            SELECT DISTINCT d.id 
+            FROM documents d 
+            LEFT JOIN document_embeddings de ON d.id = de.document_id 
+            WHERE de.document_id IS NULL 
+               OR de.embedding_status LIKE 'failed%'
+               OR de.embedding_status = 'not_processed'
+        "#;
+
+        let result = db_helper
+            .connection
+            .query(query, vec![])
+            .map_err(|e| format!("Failed to query documents without embeddings: {:?}", e))?;
+
+        let document_ids: Vec<String> = result
+            .rows
+            .iter()
+            .map(|row| match &row.values[0] {
+                PostgresDbValue::Text(id) => id.clone(),
+                _ => "unknown".to_string(),
+            })
+            .collect();
+
+        log::info!("Found {} documents without embeddings", document_ids.len());
+
+        if document_ids.is_empty() {
+            return Ok((vec![], 0));
+        }
+
+        // Generate embeddings for all found documents
+        let total_embeddings = self
+            .generate_embeddings_for_documents(document_ids.clone())
+            .await?;
+
+        log::info!(
+            "Successfully processed {} documents with {} total embeddings",
+            document_ids.len(),
+            total_embeddings
+        );
+
+        Ok((document_ids, total_embeddings))
+    }
 }
 
-struct EmbeddingGeneratorAgentImpl {
+struct DocumentEmbeddingGeneratorAgentImpl {
     db_config: PostgresDbConfig,
     embedding_client: Option<EmbeddingClient>,
     chunk_config: ChunkConfig,
 }
 
 #[agent_implementation]
-impl EmbeddingGeneratorAgent for EmbeddingGeneratorAgentImpl {
+impl DocumentEmbeddingGeneratorAgent for DocumentEmbeddingGeneratorAgentImpl {
     fn new() -> Self {
         let db_config =
             PostgresDbConfig::from_env().expect("Failed to load PostgresDbConfig from environment");
@@ -157,37 +284,9 @@ impl EmbeddingGeneratorAgent for EmbeddingGeneratorAgentImpl {
         );
         Ok(())
     }
-
-    async fn generate_embeddings_for_documents(
-        &mut self,
-        document_ids: Vec<String>,
-    ) -> AgentResult<u32> {
-        log::info!("Generating embeddings for {} documents", document_ids.len());
-
-        let mut total_embeddings = 0;
-        for document_id in &document_ids {
-            match self
-                .generate_embeddings_for_document(document_id.clone())
-                .await
-            {
-                Ok(count) => total_embeddings += count,
-                Err(e) => {
-                    log::error!("Failed to process document {}: {:?}", document_id, e);
-                    // Continue with other documents
-                }
-            }
-        }
-
-        log::info!(
-            "Generated total of {} embeddings for {} documents",
-            total_embeddings,
-            document_ids.len()
-        );
-        Ok(total_embeddings)
-    }
 }
 
-impl EmbeddingGeneratorAgentImpl {
+impl DocumentEmbeddingGeneratorAgentImpl {
     fn chunk_document(
         &self,
         content: &str,

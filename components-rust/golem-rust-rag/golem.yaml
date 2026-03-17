@@ -111,7 +111,7 @@ httpApi:
             componentName: golem-rust:rag
             response: |
               let document_id: string = request.path.document_id;
-              let agent = embedding-generator-agent();
+              let agent = document-embedding-generator-agent();
               let count = agent.generate-embeddings-for-document(document_id);
               { status: 200, body: { embeddings_generated: count } }
 
@@ -122,7 +122,7 @@ httpApi:
             componentName: golem-rust:rag
             response: |
               let document_id: string = request.path.document_id;
-              let agent = embedding-generator-agent();
+              let agent = document-embedding-generator-agent();
               let status = agent.get-embedding-status(document_id);
               { status: 200, body: { status: status } }
 

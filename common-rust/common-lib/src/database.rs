@@ -179,10 +179,10 @@ impl DatabaseHelper {
         let tags: Vec<String> = tags_str
             .iter()
             .map(|lazy_value| match lazy_value.get() {
-                PostgresDbValue::Text(tag) => tag.clone(),
-                _ => panic!("Expected Text in tags array"),
+                PostgresDbValue::Text(tag) => Ok(tag.clone()),
+                _ => Err(anyhow::anyhow!("Invalid tag type: expected Text")),
             })
-            .collect();
+            .collect::<Result<Vec<_>, _>>()?;
 
         Ok(Some(Document {
             id,
