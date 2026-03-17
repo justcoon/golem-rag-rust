@@ -76,16 +76,19 @@ httpApi:
 #              { status: 200, body: { documents: documents } }
 
         # S3 document loading endpoints
-#        - method: POST
-#          path: /s3/load/{namespace}
-#          binding:
-#            type: default
-#            componentName: golem-rust:rag
-#            response: |
-#              let namespace: string = request.path.namespace;
-#              let agent = s3-document-loader-agent();
-#              let document_ids = agent.load-documents-from-namespace(namespace);
-#              { status: 200, body: { loaded_documents: document_ids } }
+        - method: POST
+          path: /s3/load/{namespace}
+          binding:
+            type: default
+            componentName: golem-rust:rag
+            response: |
+              let namespace: string = request.path.namespace;
+              let agent = s3-document-loader-agent();
+              let result = agent.load-documents-from-namespace(namespace);
+              match result {
+                ok(r) => { status: 200, body: ok(r)  },         
+                err(e) => { status: 400, body: err({ error: e }) }
+              }
 #
 #        - method: GET
 #          path: /s3/list/{namespace}

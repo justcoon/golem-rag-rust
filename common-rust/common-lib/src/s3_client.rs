@@ -102,10 +102,26 @@ impl S3Client {
     }
 
     fn build_endpoint_url(&self, bucket: &str) -> String {
-        if self.endpoint_url.contains("localhost") || !self.endpoint_url.contains("amazonaws.com") {
-            format!("{}/{}", self.endpoint_url, bucket)
+        let base = self.endpoint_url.trim_end_matches('/');
+        if base.contains("localhost") || !base.contains("amazonaws.com") {
+            format!("{}/{}", base, bucket)
         } else {
-            format!("{}.{}.amazonaws.com", bucket, self.region)
+            // For AWS, use virtual-host style if possible, or stick to what was there
+            // Actually, the original code used bucket.region.amazonaws.com
+            format!("https://{}.s3.{}.amazonaws.com", bucket, self.region)
+        }
+    }
+
+    fn get_host_and_path(&self, bucket: &str, path: &str) -> (String, String) {
+        let base = self.endpoint_url.trim_end_matches('/');
+        if base.contains("localhost") || !base.contains("amazonaws.com") {
+            // Path-style: host is the endpoint, path starts with bucket
+            let host = base.replace("https://", "").replace("http://", "");
+            (host, format!("/{}{}", bucket, path))
+        } else {
+            // Virtual-host style: host includes bucket, path is just the resource path
+            let host = format!("{}.s3.{}.amazonaws.com", bucket, self.region);
+            (host, path.to_string())
         }
     }
 
@@ -144,40 +160,18 @@ impl S3Client {
         };
 
         let timestamp = Utc::now().format("%Y%m%dT%H%M%SZ").to_string();
-        let payload_hash = self.sha256_hex("".as_bytes());
+        let payload_hash = sha256_hex("".as_bytes());
 
-        // Include query string in the path for signature calculation
-        // For custom endpoints, include bucket in path; for AWS, use just the path
-        let path_for_signature = if query_string.is_empty() {
-            if self.endpoint_url.contains("localhost")
-                || !self.endpoint_url.contains("amazonaws.com")
-            {
-                format!("/{}{}", bucket, path)
-            } else {
-                path.to_string()
-            }
-        } else {
-            if self.endpoint_url.contains("localhost")
-                || !self.endpoint_url.contains("amazonaws.com")
-            {
-                format!("/{}{}?{}", bucket, path, query_string)
-            } else {
-                format!("{}?{}", path, query_string)
-            }
-        };
+        let (host, canonical_path) = self.get_host_and_path(bucket, path);
 
         let authorization = self.create_s3_auth_header(
             "GET",
-            &path_for_signature,
+            &host,
+            &canonical_path,
+            &query_string,
             &timestamp,
             &payload_hash,
-            &endpoint,
         );
-
-        log::debug!("S3 Request - URL: {}, Method: GET", url);
-        log::debug!("S3 Request - Path for signature: {}", path_for_signature);
-        log::debug!("S3 Request - Timestamp: {}", timestamp);
-        log::debug!("S3 Request - Authorization: {}", authorization);
 
         let response = self
             .client
@@ -207,9 +201,18 @@ impl S3Client {
         let path = format!("/{}", key);
 
         let timestamp = Utc::now().format("%Y%m%dT%H%M%SZ").to_string();
-        let payload_hash = self.sha256_hex("".as_bytes());
-        let authorization =
-            self.create_s3_auth_header("GET", &path, &timestamp, &payload_hash, &endpoint);
+        let payload_hash = sha256_hex("".as_bytes());
+
+        let (host, canonical_path) = self.get_host_and_path(bucket, &path);
+
+        let authorization = self.create_s3_auth_header(
+            "GET",
+            &host,
+            &canonical_path,
+            "",
+            &timestamp,
+            &payload_hash,
+        );
 
         let url = format!("{}{}", endpoint, path);
 
@@ -242,9 +245,18 @@ impl S3Client {
         let path = format!("/{}", key);
 
         let timestamp = Utc::now().format("%Y%m%dT%H%M%SZ").to_string();
-        let payload_hash = self.sha256_hex("".as_bytes());
-        let authorization =
-            self.create_s3_auth_header("HEAD", &path, &timestamp, &payload_hash, &endpoint);
+        let payload_hash = sha256_hex("".as_bytes());
+
+        let (host, canonical_path) = self.get_host_and_path(bucket, &path);
+
+        let authorization = self.create_s3_auth_header(
+            "HEAD",
+            &host,
+            &canonical_path,
+            "",
+            &timestamp,
+            &payload_hash,
+        );
 
         let url = format!("{}{}", endpoint, path);
 
@@ -299,39 +311,19 @@ impl S3Client {
     fn create_s3_auth_header(
         &self,
         method: &str,
-        path: &str,
+        host: &str,
+        canonical_path: &str,
+        canonical_query_string: &str,
         timestamp: &str,
         payload_hash: &str,
-        endpoint: &str,
     ) -> String {
         let date = &timestamp[0..8];
 
-        // Extract host from endpoint (exclude bucket name for custom endpoints)
-        let host = if self.endpoint_url.contains("localhost")
-            || !self.endpoint_url.contains("amazonaws.com")
-        {
-            // For custom endpoints, host is just the base URL
-            self.endpoint_url
-                .replace("https://", "")
-                .replace("http://", "")
-        } else {
-            // For AWS, use the endpoint as-is
-            endpoint.replace("https://", "").replace("http://", "")
-        };
-
-        // Split path and query string for canonical request
-        let (canonical_path, canonical_query_string) = if let Some(query_pos) = path.find('?') {
-            (&path[..query_pos], &path[query_pos + 1..])
-        } else {
-            (path, "")
-        };
-
         let canonical_headers = format!(
-            "host:{}\nx-amz-content-sha256:{}\nx-amz-date:{}",
+            "host:{}\nx-amz-content-sha256:{}\nx-amz-date:{}\n",
             host, payload_hash, timestamp
         );
         let signed_headers = "host;x-amz-content-sha256;x-amz-date";
-
         let canonical_request = format!(
             "{}\n{}\n{}\n{}\n{}\n{}",
             method,
@@ -342,17 +334,13 @@ impl S3Client {
             payload_hash
         );
 
-        log::debug!("S3 Canonical Request:\n{}", canonical_request);
-
-        let canonical_request_hash = self.sha256_hex(canonical_request.as_bytes());
+        let canonical_request_hash = sha256_hex(canonical_request.as_bytes());
 
         let credential_scope = format!("{}/{}/s3/aws4_request", date, self.region);
         let string_to_sign = format!(
             "AWS4-HMAC-SHA256\n{}\n{}\n{}",
             timestamp, credential_scope, canonical_request_hash
         );
-
-        log::debug!("S3 String to Sign:\n{}", string_to_sign);
 
         let signature = self.calculate_s3_signature(&string_to_sign, date);
 
@@ -376,11 +364,6 @@ impl S3Client {
         hex::encode(signature)
     }
 
-    fn sha256_hex(&self, data: &[u8]) -> String {
-        let mut hasher = Sha256::new();
-        hasher.update(data);
-        hex::encode(hasher.finalize())
-    }
 
     fn url_encode(&self, input: &str) -> String {
         input
@@ -393,49 +376,40 @@ impl S3Client {
     }
 
     fn parse_s3_list_response(&self, body: &str) -> S3Result<S3ListResponse> {
-        // Simple XML parsing for S3 ListObjectsV2 response
         let mut objects = Vec::new();
         let mut next_token = None;
 
-        // This is a simplified parser - in production, use proper XML parsing
-        if body.contains("<Key>") {
-            for line in body.lines() {
-                if line.trim().contains("<Key>") && line.trim().contains("</Key>") {
-                    let key = line
-                        .split("<Key>")
-                        .nth(1)
-                        .and_then(|s| s.split("</Key>").next())
-                        .unwrap_or("")
-                        .to_string();
-
-                    if !key.is_empty() {
-                        objects.push(S3DocumentSource {
-                            bucket: String::new(), // Will be set by caller
-                            key,
-                            size_bytes: 0,
-                            last_modified: String::new(),
-                            content_type: String::new(),
-                            namespace: String::new(), // Will be set by caller
-                        });
-                    }
-                }
+        // Extract NextContinuationToken if present
+        if let Some(start) = body.find("<NextContinuationToken>") {
+            if let Some(end) = body[start..].find("</NextContinuationToken>") {
+                next_token = Some(body[start + 23..start + end].to_string());
             }
         }
 
-        if body.contains("<NextContinuationToken>") {
-            for line in body.lines() {
-                if line.trim().contains("<NextContinuationToken>")
-                    && line.trim().contains("</NextContinuationToken>")
-                {
-                    next_token = Some(
-                        line.split("<NextContinuationToken>")
-                            .nth(1)
-                            .and_then(|s| s.split("</NextContinuationToken>").next())
-                            .unwrap_or("")
-                            .to_string(),
-                    );
-                    break;
-                }
+        // Split body into <Contents> blocks
+        let blocks: Vec<&str> = body.split("<Contents>").collect();
+        for block in blocks.iter().skip(1) {
+            let content_end = block.find("</Contents>").unwrap_or(block.len());
+            let content = &block[..content_end];
+
+            let key = self.extract_xml_tag(content, "Key").unwrap_or_default();
+            let size_str = self
+                .extract_xml_tag(content, "Size")
+                .unwrap_or_else(|| "0".to_string());
+            let size = size_str.parse::<u64>().unwrap_or(0);
+            let last_modified = self
+                .extract_xml_tag(content, "LastModified")
+                .unwrap_or_default();
+
+            if !key.is_empty() {
+                objects.push(S3DocumentSource {
+                    bucket: String::new(), // Will be set by caller
+                    key,
+                    size_bytes: size,
+                    last_modified,
+                    content_type: String::new(),
+                    namespace: String::new(), // Will be set by caller
+                });
             }
         }
 
@@ -444,6 +418,25 @@ impl S3Client {
             next_token,
         })
     }
+
+    fn extract_xml_tag(&self, xml: &str, tag: &str) -> Option<String> {
+        let start_tag = format!("<{}>", tag);
+        let end_tag = format!("</{}>", tag);
+
+        if let Some(start) = xml.find(&start_tag) {
+            let after_start = &xml[start + start_tag.len()..];
+            if let Some(end) = after_start.find(&end_tag) {
+                return Some(after_start[..end].to_string());
+            }
+        }
+        None
+    }
+}
+
+fn sha256_hex(data: &[u8]) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(data);
+    hex::encode(hasher.finalize())
 }
 
 fn hmac_sha256(key: &[u8], data: &[u8]) -> Vec<u8> {
