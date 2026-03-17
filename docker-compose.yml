@@ -26,20 +26,18 @@ services:
     container_name: golem-rag-rustfs
     environment:
       RUSTFS_DATA_DIR: /data
-      RUSTFS_ACCESS_KEY: ${RUSTFS_ACCESS_KEY}
-      RUSTFS_SECRET_KEY: ${RUSTFS_SECRET_KEY}
-      RUSTFS_REGION: ${RUSTFS_REGION}
-      RUSTFS_BUCKET: ${RUSTFS_BUCKET}
+      RUSTFS_ACCESS_KEY: ${AWS_ACCESS_KEY_ID}
+      RUSTFS_SECRET_KEY: ${AWS_SECRET_ACCESS_KEY}
+      RUSTFS_REGION: ${AWS_DEFAULT_REGION}
+      RUSTFS_BUCKET: ${AWS_S3_BUCKET}
       RUSTFS_ADDR: ${RUSTFS_ADDR}
       RUSTFS_LOG_LEVEL: ${RUSTFS_LOG_LEVEL}
-      # Try different variable names for RustFS
-      AWS_ACCESS_KEY_ID: ${RUSTFS_ACCESS_KEY}
-      AWS_SECRET_ACCESS_KEY: ${RUSTFS_SECRET_KEY}
-      AWS_DEFAULT_REGION: ${RUSTFS_REGION}
-      ACCESS_KEY: ${RUSTFS_ACCESS_KEY}
-      SECRET_KEY: ${RUSTFS_SECRET_KEY}
+      # Standard AWS variables for compatibility
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}
+      AWS_DEFAULT_REGION: ${AWS_DEFAULT_REGION}
     ports:
-      - "${RUSTFS_PORT}:9000"  # S3 API port
+      - "${S3_PORT}:9000"  # S3 API port
     volumes:
       - rustfs_data:/data
     networks:
@@ -76,10 +74,10 @@ services:
       rustfs:
         condition: service_healthy
     environment:
-      - AWS_ACCESS_KEY_ID=${RUSTFS_ACCESS_KEY}
-      - AWS_SECRET_ACCESS_KEY=${RUSTFS_SECRET_KEY}
-      - AWS_DEFAULT_REGION=${RUSTFS_REGION}
-      - AWS_ENDPOINT_URL=http://rustfs:${RUSTFS_PORT}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+      - AWS_DEFAULT_REGION=${AWS_DEFAULT_REGION}
+      - AWS_ENDPOINT_URL=http://rustfs:${S3_PORT}
     networks:
       - golem-rag-network
     entrypoint: >

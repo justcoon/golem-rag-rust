@@ -118,7 +118,9 @@ POSTGRES_PORT=5432
 # S3 (RustFS)
 AWS_ACCESS_KEY_ID=rustfsadmin
 AWS_SECRET_ACCESS_KEY=rustfsadmin123
+AWS_DEFAULT_REGION=us-east-1
 AWS_S3_BUCKET=golem-documents
+S3_PORT=9000
 S3_ENDPOINT_URL=http://localhost:9000
 
 # Embedding Provider

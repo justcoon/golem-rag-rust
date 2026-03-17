@@ -66,11 +66,12 @@ Copy `.env.example` to `.env` and configure as needed:
 # Database Configuration
 DB_URL=postgresql://golem_user:golem_password@localhost:5432/golem_rag
 
-# S3 Configuration (RustFS)
+# S3 Configuration (RustFS / AWS)
 AWS_ACCESS_KEY_ID=rustfsadmin
 AWS_SECRET_ACCESS_KEY=rustfsadmin123
-AWS_REGION=us-east-1
+AWS_DEFAULT_REGION=us-east-1
 AWS_S3_BUCKET=golem-documents
+S3_PORT=9000
 S3_ENDPOINT_URL=http://localhost:9000
 
 # Optional: Embedding Configuration
