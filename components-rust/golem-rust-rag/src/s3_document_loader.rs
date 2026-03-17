@@ -53,7 +53,6 @@ impl S3DocumentLoaderAgent for S3DocumentLoaderAgentImpl {
             bucket,
         }
     }
-
     fn load_documents_from_namespace(&mut self, namespace: String) -> AgentResult<Vec<String>> {
         log::info!("Loading documents from namespace: {}", namespace);
 
@@ -80,7 +79,7 @@ impl S3DocumentLoaderAgent for S3DocumentLoaderAgentImpl {
             s3_doc.namespace = namespace.clone();
 
             // Check if document already exists
-            match db_helper.document_exists_by_s3_key(&s3_doc.key) {
+            match self.document_exists_by_s3_key(&s3_doc.key, &db_helper) {
                 Ok(exists) => {
                     if exists {
                         log::info!("Document {} already exists, skipping", s3_doc.key);
@@ -277,5 +276,23 @@ impl S3DocumentLoaderAgentImpl {
             })
             .collect::<Vec<_>>()
             .join(" ")
+    }
+
+    fn document_exists_by_s3_key(
+        &self,
+        s3_key: &str,
+        db_helper: &DatabaseHelper,
+    ) -> anyhow::Result<bool> {
+        let query =
+            "SELECT COUNT(*) FROM documents WHERE metadata->'source_metadata'->>'s3_key' = $1";
+        let result = db_helper
+            .connection
+            .query(query, vec![PostgresDbValue::Text(s3_key.to_string())])?;
+
+        Ok(!result.rows.is_empty()
+            && match &result.rows[0].values[0] {
+                PostgresDbValue::Int8(count) => *count > 0,
+                _ => false,
+            })
     }
 }

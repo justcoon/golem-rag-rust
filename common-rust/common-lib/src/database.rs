@@ -61,7 +61,7 @@ impl DatabaseHelper {
     ///
     /// # Returns
     /// The result of the function, with automatic commit/rollback handling
-    pub fn with_transaction<F, R>(&self, f: F) -> Result<R>
+    pub fn transactional<F, R>(&self, f: F) -> Result<R>
     where
         F: FnOnce(&PostgresDbTransaction) -> Result<R>,
     {
@@ -90,7 +90,7 @@ impl DatabaseHelper {
     /// # Returns
     /// Ok(()) if all deletions succeeded, error if any failed
     pub fn delete_from_tables(&self, document_id: &str, tables: &[&str]) -> Result<()> {
-        self.with_transaction(|transaction| {
+        self.transactional(|transaction| {
             for table in tables {
                 let query = format!("DELETE FROM {} WHERE document_id = $1", table);
                 transaction
@@ -98,20 +98,6 @@ impl DatabaseHelper {
             }
             Ok(())
         })
-    }
-
-    pub fn document_exists_by_s3_key(&self, s3_key: &str) -> Result<bool> {
-        let query =
-            "SELECT COUNT(*) FROM documents WHERE metadata->'source_metadata'->>'s3_key' = $1";
-        let result = self
-            .connection
-            .query(query, vec![PostgresDbValue::Text(s3_key.to_string())])?;
-
-        Ok(!result.rows.is_empty()
-            && match &result.rows[0].values[0] {
-                PostgresDbValue::Int8(count) => *count > 0,
-                _ => false,
-            })
     }
 
     pub fn store_document(&self, document: &Document) -> Result<String> {
