@@ -80,7 +80,7 @@ The system consists of 5 core agents running on Golem Cloud, coordinated through
 - Similar document finding capabilities
 
 **DocumentAgent**
-- Document storage and retrieval management
+- Document retrieval operations
 - Metadata handling with filtering support
 - Document listing and search operations
 
@@ -101,8 +101,8 @@ The system consists of 5 core agents running on Golem Cloud, coordinated through
 
 ### Data Flow
 
-1. **Document Ingestion**: S3 → S3DocumentLoaderAgent → DocumentAgent → PostgreSQL
-2. **Embedding Generation**: DocumentAgent → DocumentEmbeddingGeneratorAgent → Ollama → PostgreSQL
+1. **Document Ingestion**: S3 → S3DocumentLoaderAgent → PostgreSQL
+2. **Embedding Generation**: EmbeddingGeneratorAgent → DocumentEmbeddingGeneratorAgent → Ollama → PostgreSQL
 3. **Search Operations**: API Gateway → SearchAgent → PostgreSQL (vector + full-text) → Results
 
 ### External Services

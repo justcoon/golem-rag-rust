@@ -45,15 +45,14 @@ gateway --> s3_loader : "RPC\nS3 Loading API"
 search --> postgres : "Vector + Full-text Search"
 search --> ollama : "Query Embedding Generation"
 
-document --> postgres : "Document CRUD Operations"
+document --> postgres : "GET Documents"
 
 embedding_gen --> doc_embedding_gen : "RPC\nGenerate for multiple docs"
 doc_embedding_gen --> postgres : "Read/Write Embeddings"
 doc_embedding_gen --> ollama : "Embedding Generation"
 
 s3_loader --> s3 : "S3 API\nList/Download Documents"
-s3_loader --> document : "RPC\nStore Documents"
-s3_loader --> doc_embedding_gen : "RPC\nTrigger Embedding Generation"
+s3_loader --> postgres : "Store Documents"
 
 ' Database connections
 postgres --> postgres : "Store:\n- Documents\n- Document Chunks\n- Embeddings"
@@ -82,8 +81,7 @@ end note
 
 note right of document
   <b>DocumentAgent</b>
-  - Document storage and retrieval
-  - Metadata management
+  - Document retrieval
   - Document listing with filters
   - State: Ephemeral
 end note
@@ -109,7 +107,7 @@ note right of s3_loader
   - Loads documents from S3 namespaces
   - Content type detection
   - Automatic metadata generation
-  - Document ID creation (MD5 hash)
+  - Document ID creation
   - State: Ephemeral
 end note
 
@@ -139,7 +137,7 @@ note right of ollama
   - Local embedding generation
   - Configurable models
   - Fallback support
-  - Model: all-minilm (default)
+  - Model: nomic-embed-text (default)
 end note
 
 ' Add data flow annotations
@@ -158,7 +156,6 @@ note bottom of s3_loader
   2. Download and parse documents
   3. Generate metadata and IDs
   4. Store in PostgreSQL
-  5. Trigger embedding generation
 end note
 
 @enduml
