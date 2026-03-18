@@ -3,7 +3,6 @@ use anyhow::Result;
 use golem_rust::Schema;
 use serde::{Deserialize, Serialize};
 use std::str::FromStr;
-use try_match::try_match;
 
 // Re-export Golem RDBMS types for convenience
 pub use golem_rust::bindings::golem::rdbms::postgres::{
@@ -49,10 +48,49 @@ pub struct DatabaseHelper {
     pub connection: PostgresDbConnection,
 }
 
+#[macro_export]
+macro_rules! extract_db_field {
+    ($row:expr, $idx:expr, $type:pat => $map:expr) => {
+        try_match::try_match!(&$row.values[$idx], $type => $map)
+            .map_err(|_| anyhow::anyhow!(concat!("Invalid field type at index ", $idx)))?
+    };
+    ($row:expr, $idx:expr, $type:pat => $map:expr, String) => {
+        try_match::try_match!(&$row.values[$idx], $type => $map)
+            .map_err(|_| format!("Invalid field type at index {}", $idx))?
+    };
+}
+
+#[macro_export]
+macro_rules! extract_db_array_field {
+    ($row:expr, $idx:expr, $inner_type:pat => $inner_map:expr) => {{
+        let array = extract_db_field!($row, $idx, $crate::PostgresDbValue::Array(a) => a);
+        array.iter()
+            .map(|lazy_value| match lazy_value.get() {
+                $inner_type => Ok($inner_map),
+                _ => Err(anyhow::anyhow!("Invalid array element type")),
+            })
+            .collect::<Result<Vec<_>, _>>()?
+    }};
+    ($row:expr, $idx:expr, $inner_type:pat => $inner_map:expr, String) => {{
+        let array = extract_db_field!($row, $idx, $crate::PostgresDbValue::Array(a) => a, String);
+        array.iter()
+            .map(|lazy_value| match lazy_value.get() {
+                $inner_type => Ok($inner_map),
+                _ => Err("Invalid array element type".to_string()),
+            })
+            .collect::<std::result::Result<Vec<_>, _>>()?
+    }};
+}
+
 impl DatabaseHelper {
     pub fn new(url: &str) -> Result<Self> {
         let connection = PostgresDbConnection::open(url)?;
         Ok(Self { connection })
+    }
+
+    pub fn from_env() -> Result<Self> {
+        let config = PostgresDbConfig::from_env()?;
+        Self::new(&config.db_url())
     }
 
     /// Execute a function within a database transaction
@@ -104,7 +142,7 @@ impl DatabaseHelper {
     pub fn store_document(&self, document: &Document) -> Result<String> {
         let document_id = document.id.clone();
 
-        self.connection .execute(
+        self.connection.execute(
             "INSERT INTO documents (id, title, content, metadata, created_at, updated_at, tags, source, namespace, size_bytes) 
              VALUES ($1, $2, $3, $4, $5::timestamptz, $6::timestamptz, $7, $8, $9, $10)",
             vec![
@@ -135,41 +173,20 @@ impl DatabaseHelper {
         }
 
         let row = &result.rows[0];
-        let id = try_match!(&row.values[0], PostgresDbValue::Text(id) => id.clone())
-            .map_err(|_| anyhow::anyhow!("Invalid document ID type"))?;
-        let title = try_match!(&row.values[1], PostgresDbValue::Text(title) => title.clone())
-            .map_err(|_| anyhow::anyhow!("Invalid title type"))?;
-        let content = try_match!(&row.values[2], PostgresDbValue::Text(content) => content.clone())
-            .map_err(|_| anyhow::anyhow!("Invalid content type"))?;
-        let metadata_str =
-            try_match!(&row.values[3], PostgresDbValue::Jsonb(metadata) => metadata.clone())
-                .map_err(|_| anyhow::anyhow!("Invalid metadata type"))?;
-        let source = try_match!(&row.values[4], PostgresDbValue::Text(source) => source.clone())
-            .map_err(|_| anyhow::anyhow!("Invalid source type"))?;
-        let namespace =
-            try_match!(&row.values[5], PostgresDbValue::Text(namespace) => namespace.clone())
-                .map_err(|_| anyhow::anyhow!("Invalid namespace type"))?;
-        let tags_str = try_match!(&row.values[6], PostgresDbValue::Array(tags) => tags)
-            .map_err(|_| anyhow::anyhow!("Invalid tags type"))?;
-        let size_bytes = try_match!(&row.values[7], PostgresDbValue::Int8(size) => *size)
-            .map_err(|_| anyhow::anyhow!("Invalid size_bytes type"))?;
-        let created_at =
-            try_match!(&row.values[8], PostgresDbValue::Text(created_at) => created_at.clone())
-                .map_err(|_| anyhow::anyhow!("Invalid created_at type"))?;
-        let updated_at =
-            try_match!(&row.values[9], PostgresDbValue::Text(updated_at) => updated_at.clone())
-                .map_err(|_| anyhow::anyhow!("Invalid updated_at type"))?;
+
+        // Use macro for simple fields
+        let id = extract_db_field!(row, 0, PostgresDbValue::Text(id) => id.clone());
+        let title = extract_db_field!(row, 1, PostgresDbValue::Text(title) => title.clone());
+        let content = extract_db_field!(row, 2, PostgresDbValue::Text(content) => content.clone());
+        let metadata_str = extract_db_field!(row, 3, PostgresDbValue::Jsonb(m) => m.clone());
+        let source = extract_db_field!(row, 4, PostgresDbValue::Text(s) => s.clone());
+        let namespace = extract_db_field!(row, 5, PostgresDbValue::Text(n) => n.clone());
+        let tags = extract_db_array_field!(row, 6, PostgresDbValue::Text(t) => t.clone());
+        let size_bytes = extract_db_field!(row, 7, PostgresDbValue::Int8(s) => *s);
+        let created_at = extract_db_field!(row, 8, PostgresDbValue::Text(c) => c.clone());
+        let updated_at = extract_db_field!(row, 9, PostgresDbValue::Text(u) => u.clone());
 
         let metadata: DocumentMetadata = serde_json::from_str(&metadata_str)?;
-
-        // Parse PostgreSQL array to Vec<String>
-        let tags: Vec<String> = tags_str
-            .iter()
-            .map(|lazy_value| match lazy_value.get() {
-                PostgresDbValue::Text(tag) => Ok(tag.clone()),
-                _ => Err(anyhow::anyhow!("Invalid tag type: expected Text")),
-            })
-            .collect::<Result<Vec<_>, _>>()?;
 
         Ok(Some(Document {
             id,
@@ -191,11 +208,12 @@ impl DatabaseHelper {
             .connection
             .query(query, vec![PostgresDbValue::Text(document_id.to_string())])?;
 
-        Ok(!result.rows.is_empty()
-            && match &result.rows[0].values[0] {
-                PostgresDbValue::Int8(count) => *count > 0,
-                _ => false,
-            })
+        if result.rows.is_empty() {
+            return Ok(false);
+        }
+
+        let count = extract_db_field!(result.rows[0], 0, PostgresDbValue::Int8(count) => *count);
+        Ok(count > 0)
     }
 
     pub fn update_embedding_status(
@@ -205,7 +223,7 @@ impl DatabaseHelper {
     ) -> Result<()> {
         let status_str = status.to_string();
 
-        self.connection .execute(
+        self.connection.execute(
             "UPDATE document_embeddings SET embedding_status = $1, updated_at = NOW() WHERE document_id = $2",
             vec![
                 PostgresDbValue::Text(status_str),
@@ -227,33 +245,37 @@ impl DatabaseHelper {
         }
 
         let row = &result.rows[0];
-        let status_str =
-            try_match!(&row.values[0], PostgresDbValue::Text(status) => status.clone())
-                .map_err(|_| anyhow::anyhow!("Invalid status type"))?;
+        let status_str = extract_db_field!(row, 0, PostgresDbValue::Text(status) => status.clone());
 
         EmbeddingStatus::from_str(&status_str)
             .map_err(|e| anyhow::anyhow!("Failed to parse embedding status: {}", e))
     }
 
-    pub fn store_embedding(&self, embedding: &Embedding) -> Result<()> {
+    pub fn store_embedding(
+        &self, 
+        embedding: &Embedding,
+        document_id: &str,
+        chunk_index: i32,
+        chunk_text: &str,
+    ) -> Result<()> {
         let vector_params: Vec<PostgresLazyDbValue> = embedding
             .vector
             .iter()
             .map(|&v| PostgresLazyDbValue::new(PostgresDbValue::Float4(v)))
             .collect();
 
-        self.connection .execute(
+        self.connection.execute(
             "INSERT INTO document_embeddings (id, document_id, chunk_index, chunk_text, embedding, embedding_status, created_at, updated_at) 
              VALUES ($1, $2, $3, $4, $5, $6, $7::timestamptz, $8::timestamptz)",
             vec![
                 PostgresDbValue::Text(embedding.id.clone()),
-                PostgresDbValue::Text(embedding.chunk_id.clone()), // Using chunk_id as document_id for now
-                PostgresDbValue::Int4(0), // chunk_index - will need to be updated
-                PostgresDbValue::Text("chunk_text_placeholder".to_string()), // chunk_text placeholder
+                PostgresDbValue::Text(document_id.to_string()),
+                PostgresDbValue::Int4(chunk_index),
+                PostgresDbValue::Text(chunk_text.to_string()),
                 PostgresDbValue::Array(vector_params),
-                PostgresDbValue::Text(EmbeddingStatus::InProgress.to_string()), // embedding_status - processing individual embedding
+                PostgresDbValue::Text(EmbeddingStatus::InProgress.to_string()),
                 PostgresDbValue::Text(embedding.created_at.clone()),
-                PostgresDbValue::Text(embedding.created_at.clone()), // updated_at same as created_at
+                PostgresDbValue::Text(embedding.created_at.clone()),
             ],
         )?;
 

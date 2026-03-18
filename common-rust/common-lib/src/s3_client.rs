@@ -11,8 +11,20 @@ pub struct S3Config {
     pub access_key_id: String,
     pub secret_access_key: String,
     pub region: String,
-    pub bucket: String,
     pub endpoint_url: Option<String>, // Custom S3-compatible endpoint
+}
+
+impl S3Config {
+    pub fn from_env() -> Result<Self, String> {
+        Ok(Self {
+            access_key_id: std::env::var("AWS_ACCESS_KEY_ID")
+                .map_err(|_| "AWS_ACCESS_KEY_ID environment variable not set".to_string())?,
+            secret_access_key: std::env::var("AWS_SECRET_ACCESS_KEY")
+                .map_err(|_| "AWS_SECRET_ACCESS_KEY environment variable not set".to_string())?,
+            region: std::env::var("AWS_REGION").unwrap_or_else(|_| "us-east-1".to_string()),
+            endpoint_url: std::env::var("S3_ENDPOINT_URL").ok(),
+        })
+    }
 }
 
 #[derive(Clone, Debug, Schema, Serialize, Deserialize)]
@@ -69,36 +81,34 @@ pub type S3Result<T> = Result<T, S3Error>;
 // S3 Client Implementation
 #[derive(Clone, Debug)]
 pub struct S3Client {
-    access_key_id: String,
-    secret_access_key: String,
-    region: String,
-    endpoint_url: String, // Configurable S3 endpoint
+    config: S3Config,
+    endpoint_url: String, // Fully qualified endpoint URL
     client: Client,
 }
 
 impl S3Client {
-    pub fn new(
-        access_key_id: String,
-        secret_access_key: String,
-        region: String,
-        endpoint_url: Option<String>,
-    ) -> S3Result<Self> {
+    pub fn new(config: S3Config) -> S3Result<Self> {
         let client = Client::builder()
             .timeout(std::time::Duration::from_secs(30))
             .build()
             .map_err(|e| S3Error::NetworkError(format!("Failed to create HTTP client: {:?}", e)))?;
 
         // Use custom endpoint or default AWS S3 endpoint
-        let endpoint_url =
-            endpoint_url.unwrap_or_else(|| format!("https://s3.{}.amazonaws.com", region));
+        let endpoint_url = config
+            .endpoint_url
+            .clone()
+            .unwrap_or_else(|| format!("https://s3.{}.amazonaws.com", config.region));
 
         Ok(Self {
-            access_key_id,
-            secret_access_key,
-            region,
+            config,
             endpoint_url,
             client,
         })
+    }
+
+    pub fn from_env() -> S3Result<Self> {
+        let config = S3Config::from_env().map_err(S3Error::InvalidRequest)?;
+        Self::new(config)
     }
 
     fn build_endpoint_url(&self, bucket: &str) -> String {
@@ -108,7 +118,7 @@ impl S3Client {
         } else {
             // For AWS, use virtual-host style if possible, or stick to what was there
             // Actually, the original code used bucket.region.amazonaws.com
-            format!("https://{}.s3.{}.amazonaws.com", bucket, self.region)
+            format!("https://{}.s3.{}.amazonaws.com", bucket, self.config.region)
         }
     }
 
@@ -120,7 +130,7 @@ impl S3Client {
             (host, format!("/{}{}", bucket, path))
         } else {
             // Virtual-host style: host includes bucket, path is just the resource path
-            let host = format!("{}.s3.{}.amazonaws.com", bucket, self.region);
+            let host = format!("{}.s3.{}.amazonaws.com", bucket, self.config.region);
             (host, path.to_string())
         }
     }
@@ -336,7 +346,7 @@ impl S3Client {
 
         let canonical_request_hash = sha256_hex(canonical_request.as_bytes());
 
-        let credential_scope = format!("{}/{}/s3/aws4_request", date, self.region);
+        let credential_scope = format!("{}/{}/s3/aws4_request", date, self.config.region);
         let string_to_sign = format!(
             "AWS4-HMAC-SHA256\n{}\n{}\n{}",
             timestamp, credential_scope, canonical_request_hash
@@ -346,24 +356,23 @@ impl S3Client {
 
         format!(
             "AWS4-HMAC-SHA256 Credential={}/{}, SignedHeaders={}, Signature={}",
-            self.access_key_id, credential_scope, signed_headers, signature
+            self.config.access_key_id, credential_scope, signed_headers, signature
         )
     }
 
     fn calculate_s3_signature(&self, string_to_sign: &str, date: &str) -> String {
         // AWS CLI HMAC key derivation - exact match
         let k_date = hmac_sha256(
-            format!("AWS4{}", self.secret_access_key).as_bytes(),
+            format!("AWS4{}", self.config.secret_access_key).as_bytes(),
             date.as_bytes(),
         );
-        let k_region = hmac_sha256(&k_date, self.region.as_bytes());
+        let k_region = hmac_sha256(&k_date, self.config.region.as_bytes());
         let k_service = hmac_sha256(&k_region, b"s3");
         let k_signing = hmac_sha256(&k_service, b"aws4_request");
 
         let signature = hmac_sha256(&k_signing, string_to_sign.as_bytes());
         hex::encode(signature)
     }
-
 
     fn url_encode(&self, input: &str) -> String {
         input

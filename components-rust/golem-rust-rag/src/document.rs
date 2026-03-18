@@ -1,7 +1,6 @@
 use common_lib::*;
 use golem_rust::{agent_definition, agent_implementation};
 use std::string::String;
-use try_match::try_match;
 
 pub type AgentResult<T> = std::result::Result<T, String>;
 
@@ -60,24 +59,17 @@ pub trait DocumentAgent {
     fn document_exists(&self, document_id: String) -> AgentResult<bool>;
 }
 
-struct DocumentAgentImpl {
-    db_config: PostgresDbConfig,
-}
+struct DocumentAgentImpl;
 
 #[agent_implementation]
 impl DocumentAgent for DocumentAgentImpl {
     fn new() -> Self {
-        let db_config =
-            PostgresDbConfig::from_env().expect("Failed to load PostgresDbConfig from environment");
-
-        Self { db_config }
+        Self
     }
 
     fn get_document(&self, document_id: String) -> AgentResult<Option<Document>> {
-        let db_helper: DatabaseHelper = match DatabaseHelper::new(&self.db_config.db_url()) {
-            Ok(helper) => helper,
-            Err(e) => return Err(format!("Failed to create database helper: {:?}", e)),
-        };
+        let db_helper = DatabaseHelper::from_env()
+            .map_err(|e| format!("Failed to create database helper: {:?}", e))?;
 
         db_helper
             .load_document(&document_id)
@@ -97,10 +89,8 @@ impl DocumentAgent for DocumentAgentImpl {
         filters: Option<DocumentFilters>,
         limit: Option<usize>,
     ) -> AgentResult<Vec<Document>> {
-        let db_helper: DatabaseHelper = match DatabaseHelper::new(&self.db_config.db_url()) {
-            Ok(helper) => helper,
-            Err(e) => return Err(format!("Failed to create database helper: {:?}", e)),
-        };
+        let db_helper = DatabaseHelper::from_env()
+            .map_err(|e| format!("Failed to create database helper: {:?}", e))?;
 
         // Build query with filters
         let (sql_query, params) = self.build_document_list_query(filters, limit.unwrap_or(50))?;
@@ -122,10 +112,8 @@ impl DocumentAgent for DocumentAgentImpl {
     }
 
     fn get_document_chunks(&self, document_id: String) -> AgentResult<Vec<DocumentChunk>> {
-        let db_helper: DatabaseHelper = match DatabaseHelper::new(&self.db_config.db_url()) {
-            Ok(helper) => helper,
-            Err(e) => return Err(format!("Failed to create database helper: {:?}", e)),
-        };
+        let db_helper = DatabaseHelper::from_env()
+            .map_err(|e| format!("Failed to create database helper: {:?}", e))?;
 
         let query = r#"
             SELECT id, chunk_index, content, start_pos, end_pos, token_count
@@ -149,10 +137,8 @@ impl DocumentAgent for DocumentAgentImpl {
     }
 
     fn document_exists(&self, document_id: String) -> AgentResult<bool> {
-        let db_helper: DatabaseHelper = match DatabaseHelper::new(&self.db_config.db_url()) {
-            Ok(helper) => helper,
-            Err(e) => return Err(format!("Failed to create database helper: {:?}", e)),
-        };
+        let db_helper = DatabaseHelper::from_env()
+            .map_err(|e| format!("Failed to create database helper: {:?}", e))?;
 
         db_helper
             .document_exists(&document_id)
@@ -162,42 +148,23 @@ impl DocumentAgent for DocumentAgentImpl {
 
 impl DocumentAgentImpl {
     fn parse_document_from_row(&self, row: &PostgresDbRow) -> AgentResult<Document> {
-        let id = try_match!(&row.values[0], PostgresDbValue::Text(id) => id.clone())
-            .map_err(|_| "Invalid document ID type".to_string())?;
-        let title = try_match!(&row.values[1], PostgresDbValue::Text(title) => title.clone())
-            .map_err(|_| "Invalid title type".to_string())?;
-        let content = try_match!(&row.values[2], PostgresDbValue::Text(content) => content.clone())
-            .map_err(|_| "Invalid content type".to_string())?;
+        let id = extract_db_field!(row, 0, PostgresDbValue::Text(id) => id.clone(), String);
+        let title =
+            extract_db_field!(row, 1, PostgresDbValue::Text(title) => title.clone(), String);
+        let content =
+            extract_db_field!(row, 2, PostgresDbValue::Text(content) => content.clone(), String);
         let metadata_str =
-            try_match!(&row.values[3], PostgresDbValue::Jsonb(metadata) => metadata.clone())
-                .map_err(|_| "Invalid metadata type".to_string())?;
-        let source = try_match!(&row.values[4], PostgresDbValue::Text(source) => source.clone())
-            .map_err(|_| "Invalid source type".to_string())?;
-        let namespace =
-            try_match!(&row.values[5], PostgresDbValue::Text(namespace) => namespace.clone())
-                .map_err(|_| "Invalid namespace type".to_string())?;
-        let tags_str = try_match!(&row.values[6], PostgresDbValue::Array(tags) => tags)
-            .map_err(|_| "Invalid tags type".to_string())?;
-        let size_bytes = try_match!(&row.values[7], PostgresDbValue::Int8(size) => *size)
-            .map_err(|_| "Invalid size_bytes type".to_string())?;
-        let created_at =
-            try_match!(&row.values[8], PostgresDbValue::Text(created_at) => created_at.clone())
-                .map_err(|_| "Invalid created_at type".to_string())?;
-        let updated_at =
-            try_match!(&row.values[9], PostgresDbValue::Text(updated_at) => updated_at.clone())
-                .map_err(|_| "Invalid updated_at type".to_string())?;
+            extract_db_field!(row, 3, PostgresDbValue::Jsonb(m) => m.clone(), String);
+        let source = extract_db_field!(row, 4, PostgresDbValue::Text(s) => s.clone(), String);
+        let namespace = extract_db_field!(row, 5, PostgresDbValue::Text(n) => n.clone(), String);
+        let tags: Vec<String> =
+            extract_db_array_field!(row, 6, PostgresDbValue::Text(t) => t.clone(), String);
+        let size_bytes = extract_db_field!(row, 7, PostgresDbValue::Int8(s) => *s, String);
+        let created_at = extract_db_field!(row, 8, PostgresDbValue::Text(c) => c.clone(), String);
+        let updated_at = extract_db_field!(row, 9, PostgresDbValue::Text(u) => u.clone(), String);
 
         let metadata: DocumentMetadata = serde_json::from_str(&metadata_str)
             .map_err(|e| format!("Failed to parse document metadata: {:?}", e))?;
-
-        // Parse PostgreSQL array to Vec<String>
-        let tags: Vec<String> = tags_str
-            .iter()
-            .map(|lazy_value| match lazy_value.get() {
-                PostgresDbValue::Text(tag) => Ok(tag.clone()),
-                _ => Err("Invalid tag type: expected Text".to_string()),
-            })
-            .collect::<Result<Vec<_>, _>>()?;
 
         Ok(Document {
             id,
@@ -218,16 +185,14 @@ impl DocumentAgentImpl {
         row: &PostgresDbRow,
         document_id: &str,
     ) -> AgentResult<DocumentChunk> {
-        let chunk_id = try_match!(&row.values[0], PostgresDbValue::Text(id) => id.clone())
-            .map_err(|_| "Invalid chunk ID type".to_string())?;
-        let chunk_index = try_match!(&row.values[1], PostgresDbValue::Int4(index) => *index as u32)
-            .map_err(|_| "Invalid chunk index type".to_string())?;
-        let chunk_text = try_match!(&row.values[2], PostgresDbValue::Text(text) => text.clone())
-            .map_err(|_| "Invalid chunk text type".to_string())?;
-        let start_pos = try_match!(&row.values[3], PostgresDbValue::Int4(pos) => *pos as u32)
-            .map_err(|_| "Invalid start position type".to_string())?;
-        let end_pos = try_match!(&row.values[4], PostgresDbValue::Int4(pos) => *pos as u32)
-            .map_err(|_| "Invalid end position type".to_string())?;
+        let chunk_id = extract_db_field!(row, 0, PostgresDbValue::Text(id) => id.clone(), String);
+        let chunk_index =
+            extract_db_field!(row, 1, PostgresDbValue::Int4(index) => *index as u32, String);
+        let chunk_text =
+            extract_db_field!(row, 2, PostgresDbValue::Text(text) => text.clone(), String);
+        let start_pos =
+            extract_db_field!(row, 3, PostgresDbValue::Int4(pos) => *pos as u32, String);
+        let end_pos = extract_db_field!(row, 4, PostgresDbValue::Int4(pos) => *pos as u32, String);
         let token_count = match &row.values[5] {
             PostgresDbValue::Int4(count) => Some(*count as u32),
             _ => None,

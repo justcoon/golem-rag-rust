@@ -103,6 +103,19 @@ httpApi:
 
         # Embedding generation endpoints
         - method: POST
+          path: /embeddings/generate
+          binding:
+            type: default
+            componentName: golem-rust:rag
+            response: |
+              let agent = embedding-generator-agent();
+              let result = agent.generate-embeddings-for-all-documents();
+              match result {
+                ok(r) => { status: 200, body: ok(r)  },         
+                err(e) => { status: 400, body: err({ error: e }) }
+              }
+
+        - method: POST
           path: /embeddings/generate/{document_id}
           binding:
             type: default
@@ -110,8 +123,11 @@ httpApi:
             response: |
               let document_id: string = request.path.document_id;
               let agent = document-embedding-generator-agent();
-              let count = agent.generate-embeddings-for-document(document_id);
-              { status: 200, body: { embeddings_generated: count } }
+              let result = agent.generate-embeddings-for-document(document_id);
+              match result {
+                ok(r) => { status: 200, body: ok(r)  },         
+                err(e) => { status: 400, body: err({ error: e }) }
+              }
 
         - method: GET
           path: /embeddings/status/{document_id}
@@ -121,8 +137,11 @@ httpApi:
             response: |
               let document_id: string = request.path.document_id;
               let agent = document-embedding-generator-agent();
-              let status = agent.get-embedding-status(document_id);
-              { status: 200, body: { status: status } }
+              let result = agent.get-embedding-status(document_id);
+              match result {
+                ok(r) => { status: 200, body: ok(r)  },         
+                err(e) => { status: 400, body: err({ error: e }) }
+              }
 
   deployments:
     local:

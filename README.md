@@ -65,7 +65,6 @@ S3 integration for document loading:
 ```
 ┌─────────────────┐
 │   HTTP API      │
-│   (golem.yaml)  │
 └─────────┬───────┘
           │
     ┌─────┼─────┐
@@ -339,12 +338,6 @@ cargo test
 golem build
 ```
 
-## Additional Documentation
-
-- [AGENTS.md](./AGENTS.md) - Detailed agent development guide
-- [EMBEDDING_OPTIONS.md](./EMBEDDING_OPTIONS.md) - Embedding provider configuration
-- [INFRA_SETUP.md](./INFRA_SETUP.md) - Infrastructure setup instructions
-
 ## Contributing
 
 1. Fork the repository
@@ -352,10 +345,6 @@ golem build
 3. Make your changes
 4. Run tests and linting
 5. Submit a pull request
-
-## License
-
-[Add your license here]
 
 ---
 
