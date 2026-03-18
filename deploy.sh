@@ -134,6 +134,7 @@ if golem-cli deploy "$@"; then
     echo "  POST /search                    - Search (semantic and/or keyword)"
     echo "  POST /search/similar             - Find similar documents"
     echo "  GET  /documents/{id}           - Get document"
+    echo "  POST /embeddings/generate      - Generate embeddings"
     echo "  POST /embeddings/generate/{id}   - Generate embeddings"
     echo "  GET  /embeddings/status/{id}      - Check embedding status"
 else

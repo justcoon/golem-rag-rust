@@ -1,7 +1,6 @@
 use common_lib::*;
 use golem_rust::{agent_definition, agent_implementation};
 use std::string::String;
-use try_match::try_match;
 
 pub type AgentResult<T> = std::result::Result<T, String>;
 
@@ -37,16 +36,12 @@ pub trait SearchAgent {
     ) -> AgentResult<Vec<HybridSearchResult>>;
 }
 
-struct SearchAgentImpl {
-    db_config: PostgresDbConfig,
-}
+struct SearchAgentImpl;
 
 #[agent_implementation]
 impl SearchAgent for SearchAgentImpl {
     fn new() -> Self {
-        let db_config =
-            PostgresDbConfig::from_env().expect("Failed to load PostgresDbConfig from environment");
-        Self { db_config }
+        Self
     }
 
     async fn find_similar_documents(
@@ -56,10 +51,8 @@ impl SearchAgent for SearchAgentImpl {
     ) -> AgentResult<Vec<SearchResult>> {
         log::info!("Finding similar documents to: {}", document_id);
 
-        let db_helper: DatabaseHelper = match DatabaseHelper::new(&self.db_config.db_url()) {
-            Ok(helper) => helper,
-            Err(e) => return Err(format!("Failed to create database helper: {:?}", e)),
-        };
+        let db_helper = DatabaseHelper::from_env()
+            .map_err(|e| format!("Failed to create database helper: {:?}", e))?;
 
         let limit = limit.unwrap_or(10);
 
@@ -93,13 +86,8 @@ impl SearchAgent for SearchAgentImpl {
     ) -> AgentResult<Vec<HybridSearchResult>> {
         log::info!("Performing search for query: {}", query);
 
-        let db_helper: DatabaseHelper = match DatabaseHelper::new(&self.db_config.db_url()) {
-            Ok(helper) => helper,
-            Err(e) => {
-                log::error!("Failed to create database helper: {:?}", e);
-                return Err(format!("Failed to create database helper: {:?}", e));
-            }
-        };
+        let db_helper = DatabaseHelper::from_env()
+            .map_err(|e| format!("Failed to create database helper: {:?}", e))?;
 
         let limit = limit.unwrap_or(10);
         let threshold = threshold.unwrap_or(0.7);
@@ -144,21 +132,18 @@ impl SearchAgentImpl {
         query: &str,
         threshold: Option<f32>,
     ) -> AgentResult<Option<SearchResult>> {
-        let chunk_id = try_match!(&row.values[0], PostgresDbValue::Text(id) => id.clone())
-            .map_err(|_| "Invalid chunk ID type".to_string())?;
-        let document_id = try_match!(&row.values[1], PostgresDbValue::Text(id) => id.clone())
-            .map_err(|_| "Invalid document ID type".to_string())?;
-        let chunk_index = try_match!(&row.values[2], PostgresDbValue::Int4(index) => *index as u32)
-            .map_err(|_| "Invalid chunk index type".to_string())?;
-        let chunk_text = try_match!(&row.values[3], PostgresDbValue::Text(text) => text.clone())
-            .map_err(|_| "Invalid chunk text type".to_string())?;
-        let start_pos = try_match!(&row.values[4], PostgresDbValue::Int4(pos) => *pos as u32)
-            .map_err(|_| "Invalid start position type".to_string())?;
-        let end_pos = try_match!(&row.values[5], PostgresDbValue::Int4(pos) => *pos as u32)
-            .map_err(|_| "Invalid end position type".to_string())?;
+        let chunk_id = extract_db_field!(row, 0, PostgresDbValue::Text(id) => id.clone(), String);
+        let document_id =
+            extract_db_field!(row, 1, PostgresDbValue::Text(id) => id.clone(), String);
+        let chunk_index =
+            extract_db_field!(row, 2, PostgresDbValue::Int4(index) => *index as u32, String);
+        let chunk_text =
+            extract_db_field!(row, 3, PostgresDbValue::Text(text) => text.clone(), String);
+        let start_pos =
+            extract_db_field!(row, 4, PostgresDbValue::Int4(pos) => *pos as u32, String);
+        let end_pos = extract_db_field!(row, 5, PostgresDbValue::Int4(pos) => *pos as u32, String);
         let token_count =
-            try_match!(&row.values[6], PostgresDbValue::Int4(count) => Some(*count as u32))
-                .map_err(|_| "Invalid token count type".to_string())?;
+            extract_db_field!(row, 6, PostgresDbValue::Int4(count) => Some(*count as u32), String);
         let similarity_score = match &row.values[7] {
             PostgresDbValue::Float4(score) => *score,
             PostgresDbValue::Float8(score) => *score as f32,
@@ -301,19 +286,16 @@ impl SearchAgentImpl {
         }
 
         // Get the embedding vector from the database
-        let embedding_array =
-            try_match!(&result.rows[0].values[0], PostgresDbValue::Array(array) => array)
-                .map_err(|_| "Invalid embedding type".to_string())?;
-
-        // Convert the array values to f32 vector
-        let embedding: Vec<f32> = embedding_array
-            .iter()
-            .map(|lazy_value: &PostgresLazyDbValue| match lazy_value.get() {
-                PostgresDbValue::Float4(value) => Ok(value),
-                PostgresDbValue::Float8(value) => Ok(value as f32),
-                _ => Err("Invalid embedding type: expected Float4 or Float8".to_string()),
-            })
-            .collect::<Result<Vec<_>, _>>()?;
+        let embedding: Vec<f32> = extract_db_array_field!(
+            result.rows[0],
+            0,
+            v => match v {
+                PostgresDbValue::Float4(value) => value,
+                PostgresDbValue::Float8(value) => value as f32,
+                _ => return Err("Invalid embedding type: expected Float4 or Float8".to_string()),
+            },
+            String
+        );
 
         Ok(embedding)
     }

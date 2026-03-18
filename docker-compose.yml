@@ -68,7 +68,7 @@ services:
 
   # RustFS setup for bucket initialization
   rustfs-setup:
-    image: alpine:latest
+    image: amazon/aws-cli:latest
     container_name: golem-rag-rustfs-setup
     depends_on:
       rustfs:
@@ -77,19 +77,13 @@ services:
       - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
       - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
       - AWS_DEFAULT_REGION=${AWS_DEFAULT_REGION}
-      - AWS_ENDPOINT_URL=http://rustfs:${S3_PORT}
+      - AWS_S3_BUCKET=${AWS_S3_BUCKET}
     networks:
       - golem-rag-network
     entrypoint: >
       /bin/sh -c "
-      apk add --no-cache curl &&
-      sleep 5 &&
-      curl -X PUT http://rustfs:9000/golem-documents \
-        -H 'Host: golem-documents.rustfs:9000' \
-        -H 'Content-Length: 0' \
-        -H 'Authorization: AWS4-HMAC-SHA256 Credential=rustfsadmin/20240101/us-east-1/s3/aws4_request, SignedHeaders=host;x-amz-date, Signature=placeholder' \
-        -v &&
-      echo 'RustFS bucket created successfully'
+      aws --endpoint-url http://rustfs:9000 s3 mb s3://$${AWS_S3_BUCKET} || echo 'Bucket might already exist';
+      echo 'RustFS bucket setup complete'
       "
 
   # Ollama setup for embedding model
@@ -99,11 +93,14 @@ services:
     depends_on:
       ollama:
         condition: service_healthy
+    environment:
+      - OLLAMA_HOST=ollama:11434
+      - OLLAMA_MODEL=${OLLAMA_MODEL}
     networks:
       - golem-rag-network
     entrypoint: >
       /bin/sh -c "
-      ollama pull ${OLLAMA_MODEL} &&
+      ollama pull $${OLLAMA_MODEL} &&
       echo 'Embedding model downloaded successfully'
       "
 

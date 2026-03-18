@@ -171,7 +171,6 @@ impl EmbeddingGeneratorAgent for EmbeddingGeneratorAgentImpl {
 }
 
 struct DocumentEmbeddingGeneratorAgentImpl {
-    db_config: PostgresDbConfig,
     embedding_client: Option<EmbeddingClient>,
     chunk_config: ChunkConfig,
 }
@@ -179,22 +178,12 @@ struct DocumentEmbeddingGeneratorAgentImpl {
 #[agent_implementation]
 impl DocumentEmbeddingGeneratorAgent for DocumentEmbeddingGeneratorAgentImpl {
     fn new() -> Self {
-        let db_config =
-            PostgresDbConfig::from_env().expect("Failed to load PostgresDbConfig from environment");
-
         // Initialize embedding client if available
-        let embedding_client = match EmbeddingClient::from_env() {
-            Ok(client) => Some(client),
-            Err(e) => {
-                log::warn!("Failed to initialize embedding client: {:?}", e);
-                None
-            }
-        };
+        let embedding_client = EmbeddingClient::from_env().ok();
 
         let chunk_config = ChunkConfig::default();
 
         Self {
-            db_config,
             embedding_client,
             chunk_config,
         }
@@ -443,7 +432,7 @@ impl DocumentEmbeddingGeneratorAgentImpl {
 
         // Store embedding
         db_helper
-            .store_embedding(&embedding)
+            .store_embedding(&embedding, document_id, chunk_index as i32, &chunk.content)
             .map_err(|e| format!("Failed to store embedding: {:?}", e))?;
 
         log::debug!(
@@ -462,8 +451,7 @@ impl DocumentEmbeddingGeneratorAgentImpl {
     }
 
     fn create_db_helper(&self) -> AgentResult<DatabaseHelper> {
-        DatabaseHelper::new(&self.db_config.db_url())
-            .map_err(|e| format!("Failed to create database helper: {:?}", e))
+        DatabaseHelper::from_env().map_err(|e| format!("Failed to create database helper: {:?}", e))
     }
 
     fn load_document(

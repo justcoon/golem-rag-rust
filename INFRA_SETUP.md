@@ -25,6 +25,12 @@ This document describes how to set up the required infrastructure for the Golem 
 - **Bucket**: `golem-documents`
 - **Data Directory**: `/data` (persisted in Docker volume)
 
+### Ollama (Embeddings)
+- **Image**: `ollama/ollama:latest`
+- **Port**: 11434
+- **Model**: `nomic-embed-text` (default)
+- **Auto-setup**: The `ollama-setup` service automatically pulls the model on startup.
+
 ## Quick Start
 
 1. **Start the infrastructure**:
@@ -164,6 +170,12 @@ RustFS is a lightweight S3-compatible object storage server written in Rust:
 - Check Docker logs: `docker-compose logs rustfs`
 - Verify credentials in environment variables
 - Ensure bucket exists: Check rustfs-setup container logs
+
+### Issues with Ollama
+- Verify service is running: `curl http://localhost:11434/api/tags`
+- Check setup logs: `docker logs golem-rag-ollama-setup`
+- Verify model is pulled: `docker exec golem-rag-ollama ollama list`
+- Ensure `OLLAMA_HOST` is correctly set in the environment if accessing from outside Docker.
 
 ### Issues with Golem Agent
 - Ensure all environment variables are set

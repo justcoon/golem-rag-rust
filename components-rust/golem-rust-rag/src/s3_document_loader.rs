@@ -24,7 +24,6 @@ pub trait S3DocumentLoaderAgent {
 }
 
 struct S3DocumentLoaderAgentImpl {
-    db_config: PostgresDbConfig,
     s3_client: S3Client,
     bucket: String,
 }
@@ -32,48 +31,30 @@ struct S3DocumentLoaderAgentImpl {
 #[agent_implementation]
 impl S3DocumentLoaderAgent for S3DocumentLoaderAgentImpl {
     fn new() -> Self {
-        let db_config =
-            PostgresDbConfig::from_env().expect("Failed to load PostgresDbConfig from environment");
-
-        let access_key_id = std::env::var("AWS_ACCESS_KEY_ID")
-            .expect("AWS_ACCESS_KEY_ID environment variable must be set");
-        let secret_access_key = std::env::var("AWS_SECRET_ACCESS_KEY")
-            .expect("AWS_SECRET_ACCESS_KEY environment variable must be set");
-        let region = std::env::var("AWS_REGION").unwrap_or_else(|_| "us-east-1".to_string());
+        let s3_client =
+            S3Client::from_env().expect("Failed to initialize S3 client from environment");
         let bucket =
             std::env::var("AWS_S3_BUCKET").expect("AWS_S3_BUCKET environment variable must be set");
-        let endpoint_url = std::env::var("S3_ENDPOINT_URL").ok();
 
-        let s3_client = S3Client::new(access_key_id, secret_access_key, region, endpoint_url)
-            .expect("Failed to create S3 client");
-
-        Self {
-            db_config,
-            s3_client,
-            bucket,
-        }
+        Self { s3_client, bucket }
     }
     fn load_documents_from_namespace(&mut self, namespace: String) -> AgentResult<Vec<String>> {
         log::info!("Loading documents from namespace: {}", namespace);
 
         // Step 1: Map namespace to S3 prefix
-        let s3_prefix = match self.namespace_to_s3_prefix(&namespace) {
-            Ok(prefix) => prefix,
-            Err(e) => return Err(format!("Failed to create S3 prefix: {:?}", e)),
-        };
+        let s3_prefix = self
+            .namespace_to_s3_prefix(&namespace)
+            .map_err(|e| format!("Failed to create S3 prefix: {:?}", e))?;
 
         // Step 2: List documents in S3
-        let mut s3_documents = match self.list_s3_documents(&s3_prefix) {
-            Ok(docs) => docs,
-            Err(e) => return Err(format!("Failed to list S3 documents: {:?}", e)),
-        };
+        let mut s3_documents = self
+            .list_s3_documents(&s3_prefix)
+            .map_err(|e| format!("Failed to list S3 documents: {:?}", e))?;
 
         // Step 3: Process each document
         let mut loaded_document_ids = Vec::new();
-        let db_helper: DatabaseHelper = match DatabaseHelper::new(&self.db_config.db_url()) {
-            Ok(helper) => helper,
-            Err(e) => return Err(format!("Failed to create database helper: {:?}", e)),
-        };
+        let db_helper = DatabaseHelper::from_env()
+            .map_err(|e| format!("Failed to create database helper: {:?}", e))?;
 
         for s3_doc in &mut s3_documents {
             s3_doc.namespace = namespace.clone();
@@ -135,11 +116,7 @@ impl S3DocumentLoaderAgent for S3DocumentLoaderAgentImpl {
                         metadata.insert("last_modified".to_string(), s3_doc.last_modified.clone());
                         metadata
                     },
-                    metadata: {
-                        let mut metadata = std::collections::HashMap::new();
-                        metadata.insert("namespace".to_string(), namespace.clone());
-                        metadata
-                    },
+                    metadata: std::collections::HashMap::new(),
                 },
             };
 
@@ -170,14 +147,12 @@ impl S3DocumentLoaderAgent for S3DocumentLoaderAgentImpl {
     }
 
     fn list_namespace_documents(&self, namespace: String) -> AgentResult<Vec<S3DocumentSource>> {
-        let s3_prefix = match self.namespace_to_s3_prefix(&namespace) {
-            Ok(prefix) => prefix,
-            Err(e) => return Err(format!("Failed to create S3 prefix: {:?}", e)),
-        };
-        let mut documents = match self.list_s3_documents(&s3_prefix) {
-            Ok(docs) => docs,
-            Err(e) => return Err(format!("Failed to list S3 documents: {:?}", e)),
-        };
+        let s3_prefix = self
+            .namespace_to_s3_prefix(&namespace)
+            .map_err(|e| format!("Failed to create S3 prefix: {:?}", e))?;
+        let mut documents = self
+            .list_s3_documents(&s3_prefix)
+            .map_err(|e| format!("Failed to list S3 documents: {:?}", e))?;
         for doc in &mut documents {
             doc.namespace = namespace.clone();
         }
@@ -199,10 +174,10 @@ impl S3DocumentLoaderAgentImpl {
     }
 
     fn list_s3_documents(&self, s3_prefix: &str) -> AgentResult<Vec<S3DocumentSource>> {
-        let list_response = match self.s3_client.list_objects(&self.bucket, Some(s3_prefix)) {
-            Ok(response) => response,
-            Err(e) => return Err(format!("Failed to list S3 objects: {:?}", e)),
-        };
+        let list_response = self
+            .s3_client
+            .list_objects(&self.bucket, Some(s3_prefix))
+            .map_err(|e| format!("Failed to list S3 objects: {:?}", e))?;
         let mut documents = Vec::new();
 
         for obj in list_response.objects {
@@ -287,10 +262,11 @@ impl S3DocumentLoaderAgentImpl {
             .connection
             .query(query, vec![PostgresDbValue::Text(s3_key.to_string())])?;
 
-        Ok(!result.rows.is_empty()
-            && match &result.rows[0].values[0] {
-                PostgresDbValue::Int8(count) => *count > 0,
-                _ => false,
-            })
+        if result.rows.is_empty() {
+            return Ok(false);
+        }
+
+        let count = extract_db_field!(result.rows[0], 0, PostgresDbValue::Int8(count) => *count);
+        Ok(count > 0)
     }
 }
