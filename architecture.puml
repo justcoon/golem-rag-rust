@@ -1,0 +1,161 @@
+@startuml Golem RAG System Architecture
+
+' Define styles
+skinparam componentStyle uml2
+skinparam backgroundColor #F5F5F5
+skinparam defaultFontName Arial
+skinparam defaultFontSize 12
+skinparam roundcorner 10
+skinparam shadowing true
+skinparam ArrowColor #666666
+skinparam ComponentBackgroundColor #E8E8E8
+skinparam ComponentBorderColor #666666
+
+' Define external actors and services
+actor "User" as user #FFD700
+
+package "Golem Cloud" {
+    [HTTP API Gateway] as gateway #F9E79F
+    [SearchAgent] as search #D5F5E3
+    [DocumentAgent] as document #D6EAF8
+    [EmbeddingGeneratorAgent] as embedding_gen #FADBD8
+    [DocumentEmbeddingGeneratorAgent] as doc_embedding_gen #E8DAEF
+    [S3DocumentLoaderAgent] as s3_loader #D1F2EB
+}
+
+package "External Services" {
+    [PostgreSQL + pgvector] as postgres #AED6F1
+    [RustFS S3 Storage] as s3 #F9E79F
+    [Ollama Embedding Service] as ollama #D5F5E3
+}
+
+' Force vertical layout with explicit connections
+gateway -[hidden]-> postgres
+
+' Define relationships
+user --> gateway : "HTTP Requests\n(REST API Calls)"
+
+gateway --> search : "RPC\nSearch API"
+gateway --> document : "RPC\nDocument API"
+gateway --> embedding_gen : "RPC\nBatch Embedding API"
+gateway --> doc_embedding_gen : "RPC\nSingle Document API"
+gateway --> s3_loader : "RPC\nS3 Loading API"
+
+' Agent-to-agent communication
+search --> postgres : "Vector + Full-text Search"
+search --> ollama : "Query Embedding Generation"
+
+document --> postgres : "GET Documents"
+
+embedding_gen --> doc_embedding_gen : "RPC\nGenerate for multiple docs"
+doc_embedding_gen --> postgres : "Read/Write Embeddings"
+doc_embedding_gen --> ollama : "Embedding Generation"
+
+s3_loader --> s3 : "S3 API\nList/Download Documents"
+s3_loader --> postgres : "Store Documents"
+
+' Database connections
+postgres --> postgres : "Store:\n- Documents\n- Document Chunks\n- Embeddings"
+
+' Add notes
+note right of gateway
+  <b>HTTP API Gateway</b>
+  - Routes REST API to agents
+  • POST /search → SearchAgent
+  • POST /search/similar → SearchAgent
+  • GET /documents/{id} → DocumentAgent
+  • POST /embeddings/generate → EmbeddingGeneratorAgent
+  • POST /embeddings/generate/{id} → DocumentEmbeddingGeneratorAgent
+  • POST /s3/load/{namespace} → S3DocumentLoaderAgent
+  - Transforms REST to Golem RPC
+end note
+
+note right of search
+  <b>SearchAgent</b>
+  - Hybrid search (semantic + keyword)
+  - Reciprocal Rank Fusion (RRF)
+  - Configurable search weights
+  - Similar document finding
+  - State: Ephemeral
+end note
+
+note right of document
+  <b>DocumentAgent</b>
+  - Document retrieval
+  - Document listing with filters
+  - State: Ephemeral
+end note
+
+note right of embedding_gen
+  <b>EmbeddingGeneratorAgent</b>
+  - Batch processing coordinator
+  - Finds documents without embeddings
+  - Parallel processing orchestration
+  - State: Ephemeral
+end note
+
+note right of doc_embedding_gen
+  <b>DocumentEmbeddingGeneratorAgent</b>
+  - Single document embedding processing
+  - Text chunking and vector generation
+  - Embedding status tracking
+  - State: Ephemeral
+end note
+
+note right of s3_loader
+  <b>S3DocumentLoaderAgent</b>
+  - Loads documents from S3 namespaces
+  - Content type detection
+  - Automatic metadata generation
+  - Document ID creation
+  - State: Ephemeral
+end note
+
+note right of postgres
+  <b>PostgreSQL + pgvector</b>
+  - Document metadata and content
+  - Text chunks for search
+  - Vector embeddings storage
+  - Full-text search capabilities
+  - Persistent storage
+end note
+
+note right of s3
+  <b>RustFS S3 Storage</b>
+  - S3-compatible document storage
+  - Namespace organization
+  - Multiple content types supported
+  • Markdown (.md)
+  • Text (.txt)
+  • PDF (.pdf)
+  • HTML (.html)
+  • JSON (.json)
+end note
+
+note right of ollama
+  <b>Ollama Embedding Service</b>
+  - Local embedding generation
+  - Configurable models
+  - Fallback support
+  - Model: nomic-embed-text (default)
+end note
+
+' Add data flow annotations
+note bottom of search
+  <b>Hybrid Search Flow:</b>
+  1. Generate query embedding (Ollama)
+  2. Vector similarity search (PostgreSQL)
+  3. Full-text search (PostgreSQL)
+  4. Fuse results with RRF
+  5. Return ranked results
+end note
+
+note bottom of s3_loader
+  <b>Document Loading Flow:</b>
+  1. List S3 objects in namespace
+  2. Download and parse documents
+  3. Generate metadata and IDs
+  4. Store in PostgreSQL
+end note
+
+@enduml

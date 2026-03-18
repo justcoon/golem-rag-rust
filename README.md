@@ -62,35 +62,54 @@ S3 integration for document loading:
 
 ## Architecture
 
-```
-┌─────────────────┐
-│   HTTP API      │
-└─────────┬───────┘
-          │
-    ┌─────┼─────┐
-    ▼           ▼           
-┌─────────┐ ┌─────────┐ ┌─────────┐
-│Search   │ │Document │ │Embedding│
-│Agent    │ │Agent    │ │Generator│
-└────┬────┘ └────┬────┘ └────┬────┘
-     │           │           │
-     └─────────┬─┘   ┌───────┘
-               │     │
-               |     ▼
-    ┌─────────┐| ┌─────────┐
-    │S3Doc    │| │Document │
-    │Loader   │| │Embedding│
-    │Agent    │| │Generator│
-    └────┬────┘| └────┬────┘
-         │     |      │
-         └─────┬──────┘
-               │
-               ▼
-        ┌─────────────┐
-        │ PostgreSQL  │
-        │ + pgvector  │
-        └─────────────┘
-```
+![Golem RAG System Architecture](architecture.png)
+
+The system consists of 5 core agents running on Golem Cloud, coordinated through an HTTP API Gateway and backed by PostgreSQL with pgvector for persistent storage:
+
+### Core Components
+
+**API Gateway**
+- Routes REST API requests to appropriate agents
+- Transforms HTTP to Golem RPC calls
+- Provides unified interface for all operations
+
+**SearchAgent**
+- Hybrid search combining semantic (vector) and keyword (full-text) search
+- Reciprocal Rank Fusion (RRF) for result combination
+- Configurable search weights and thresholds
+- Similar document finding capabilities
+
+**DocumentAgent**
+- Document retrieval operations
+- Metadata handling with filtering support
+- Document listing and search operations
+
+**EmbeddingGeneratorAgent**
+- Batch processing coordinator for multiple documents
+- Finds and processes documents without embeddings
+- Parallel processing orchestration
+
+**DocumentEmbeddingGeneratorAgent**
+- Single document embedding processing
+- Text chunking and vector generation
+- Embedding status tracking and management
+
+**S3DocumentLoaderAgent**
+- Document loading from S3 namespaces
+- Content type detection (md, txt, pdf, html, json)
+- Automatic metadata generation and document ID creation
+
+### Data Flow
+
+1. **Document Ingestion**: S3 → S3DocumentLoaderAgent → PostgreSQL
+2. **Embedding Generation**: EmbeddingGeneratorAgent → DocumentEmbeddingGeneratorAgent → Ollama → PostgreSQL
+3. **Search Operations**: API Gateway → SearchAgent → PostgreSQL (vector + full-text) → Results
+
+### External Services
+
+- **PostgreSQL + pgvector**: Persistent storage for documents, chunks, and vector embeddings
+- **RustFS S3 Storage**: S3-compatible document storage with namespace organization
+- **Ollama**: Local embedding generation service with configurable models
 
 ## Quick Start
 
@@ -104,29 +123,7 @@ S3 integration for document loading:
 
 ### Environment Setup
 
-Copy `.env.example` to `.env` and configure:
-
-```bash
-# Database
-POSTGRES_HOST=localhost
-POSTGRES_DB=rag_db
-POSTGRES_USER=postgres
-POSTGRES_PASSWORD=password
-POSTGRES_PORT=5432
-
-# S3 (RustFS)
-AWS_ACCESS_KEY_ID=rustfsadmin
-AWS_SECRET_ACCESS_KEY=rustfsadmin123
-AWS_DEFAULT_REGION=us-east-1
-AWS_S3_BUCKET=golem-documents
-S3_PORT=9000
-S3_ENDPOINT_URL=http://localhost:9000
-
-# Embedding Provider
-EMBEDDING_PROVIDER=openai
-EMBEDDING_API_KEY=your_api_key
-EMBEDDING_MODEL=text-embedding-3-small
-```
+Copy `.env.example` to `.env` and configure if needed.
 
 ### Infrastructure Setup
 
