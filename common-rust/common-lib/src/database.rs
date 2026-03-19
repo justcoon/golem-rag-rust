@@ -139,6 +139,19 @@ impl DatabaseHelper {
         })
     }
 
+    /// Delete a document and all associated data (chunks, embeddings)
+    /// 
+    /// # Arguments
+    /// * `document_id` - The document ID to delete
+    pub fn delete_document(&self, document_id: &str) -> Result<()> {
+        log::info!("Deleting document: {}", document_id);
+        self.connection.execute(
+            "DELETE FROM documents WHERE id = $1",
+            vec![PostgresDbValue::Text(document_id.to_string())]
+        )?;
+        Ok(())
+    }
+
     pub fn store_document(&self, document: &Document) -> Result<String> {
         let document_id = document.id.clone();
 
