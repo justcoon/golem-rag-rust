@@ -1,4 +1,5 @@
 extern crate common_lib;
+use chrono::DateTime;
 use common_lib::*;
 use golem_rust::{agent_definition, agent_implementation};
 use std::string::String;
@@ -59,16 +60,52 @@ impl S3DocumentLoaderAgent for S3DocumentLoaderAgentImpl {
         for s3_doc in &mut s3_documents {
             s3_doc.namespace = namespace.clone();
 
-            // Check if document already exists
-            match self.document_exists_by_s3_key(&s3_doc.key, &db_helper) {
-                Ok(exists) => {
-                    if exists {
-                        log::info!("Document {} already exists, skipping", s3_doc.key);
+            // Check if document already exists and if it needs update
+            match self.get_document_info_by_s3_key(&s3_doc.key, &namespace, &db_helper) {
+                Ok(Some((id, db_last_modified))) => {
+                    let needs_update = match db_last_modified {
+                        Some(ref db_timestamp) => {
+                            match (
+                                DateTime::parse_from_rfc3339(&s3_doc.last_modified),
+                                DateTime::parse_from_rfc3339(db_timestamp),
+                            ) {
+                                (Ok(s3_dt), Ok(db_dt)) => s3_dt > db_dt,
+                                _ => {
+                                    log::warn!("Failed to parse timestamps for comparison, falling back to string comparison. S3: {}, DB: {}", s3_doc.last_modified, db_timestamp);
+                                    s3_doc.last_modified > *db_timestamp
+                                }
+                            }
+                        }
+                        None => {
+                            log::info!(
+                                "Document {} has no stored timestamp, treating as new",
+                                s3_doc.key
+                            );
+                            true
+                        }
+                    };
+
+                    if needs_update {
+                        log::info!(
+                            "Document {} has changed (S3: {}, DB: {}). Updating...",
+                            s3_doc.key,
+                            s3_doc.last_modified,
+                            db_last_modified.unwrap_or("None".to_string())
+                        );
+                        if let Err(e) = db_helper.delete_document(&id) {
+                            log::error!("Failed to delete old document version {}: {:?}", id, e);
+                            continue;
+                        }
+                    } else {
+                        log::info!("Document {} is up to date, skipping", s3_doc.key);
                         continue;
                     }
                 }
+                Ok(None) => {
+                    log::info!("Document {} is new, loading...", s3_doc.key);
+                }
                 Err(e) => {
-                    log::error!("Error checking if document exists: {:?}", e);
+                    log::error!("Error checking document status for {}: {:?}", s3_doc.key, e);
                     continue;
                 }
             }
@@ -251,22 +288,32 @@ impl S3DocumentLoaderAgentImpl {
             .join(" ")
     }
 
-    fn document_exists_by_s3_key(
+    fn get_document_info_by_s3_key(
         &self,
         s3_key: &str,
+        namespace: &str,
         db_helper: &DatabaseHelper,
-    ) -> anyhow::Result<bool> {
-        let query =
-            "SELECT COUNT(*) FROM documents WHERE metadata->'source_metadata'->>'s3_key' = $1";
-        let result = db_helper
-            .connection
-            .query(query, vec![PostgresDbValue::Text(s3_key.to_string())])?;
+    ) -> anyhow::Result<Option<(String, Option<String>)>> {
+        let query = "SELECT id, metadata->'source_metadata'->>'last_modified' FROM documents WHERE metadata->'source_metadata'->>'s3_key' = $1 AND source = 's3' AND namespace = $2";
+        let result = db_helper.connection.query(
+            query,
+            vec![
+                PostgresDbValue::Text(s3_key.to_string()),
+                PostgresDbValue::Text(namespace.to_string()),
+            ],
+        )?;
 
         if result.rows.is_empty() {
-            return Ok(false);
+            return Ok(None);
         }
 
-        let count = extract_db_field!(result.rows[0], 0, PostgresDbValue::Int8(count) => *count);
-        Ok(count > 0)
+        let id = extract_db_field!(result.rows[0], 0, PostgresDbValue::Text(id) => id.clone());
+        // JSONB ->> operator can return NULL, so we handle it with Option
+        let last_modified = match &result.rows[0].values[1] {
+            PostgresDbValue::Text(lm) if !lm.is_empty() => Some(lm.clone()),
+            _ => None,
+        };
+
+        Ok(Some((id, last_modified)))
     }
 }
