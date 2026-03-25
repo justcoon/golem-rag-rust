@@ -43,24 +43,17 @@ impl S3DocumentLoaderAgent for S3DocumentLoaderAgentImpl {
     fn load_documents_from_namespace(&mut self, namespace: String) -> AgentResult<Vec<String>> {
         log::info!("Loading documents from namespace: {}", namespace);
 
-        // Step 1: Map namespace to S3 prefix
-        let s3_prefix = self
-            .namespace_to_s3_prefix(&namespace)
-            .map_err(|e| format!("Failed to create S3 prefix: {:?}", e))?;
-
-        // Step 2: List documents in S3
-        let mut s3_documents = self
-            .list_s3_documents(&s3_prefix)
+        // Step 1: List documents in S3 using namespace directly
+        let s3_documents = self
+            .list_s3_documents(&namespace)
             .map_err(|e| format!("Failed to list S3 documents: {:?}", e))?;
 
-        // Step 3: Process each document
+        // Step 2: Process each document
         let mut loaded_document_ids = Vec::new();
         let db_helper = DatabaseHelper::from_env()
             .map_err(|e| format!("Failed to create database helper: {:?}", e))?;
 
-        for s3_doc in &mut s3_documents {
-            s3_doc.namespace = namespace.clone();
-
+        for s3_doc in &s3_documents {
             // Check if document already exists and if it needs update
             match self.get_document_info_by_s3_key(&s3_doc.key, &namespace, &db_helper) {
                 Ok(Some((id, db_last_modified))) => {
@@ -185,16 +178,7 @@ impl S3DocumentLoaderAgent for S3DocumentLoaderAgentImpl {
     }
 
     fn list_namespace_documents(&self, namespace: String) -> AgentResult<Vec<S3DocumentSource>> {
-        let s3_prefix = self
-            .namespace_to_s3_prefix(&namespace)
-            .map_err(|e| format!("Failed to create S3 prefix: {:?}", e))?;
-        let mut documents = self
-            .list_s3_documents(&s3_prefix)
-            .map_err(|e| format!("Failed to list S3 documents: {:?}", e))?;
-        for doc in &mut documents {
-            doc.namespace = namespace.clone();
-        }
-        Ok(documents)
+        self.list_s3_documents(&namespace)
     }
 }
 
@@ -211,10 +195,14 @@ impl S3DocumentLoaderAgentImpl {
         Ok(s3_prefix)
     }
 
-    fn list_s3_documents(&self, s3_prefix: &str) -> AgentResult<Vec<S3DocumentSource>> {
+    fn list_s3_documents(&self, namespace: &str) -> AgentResult<Vec<S3DocumentSource>> {
+        let s3_prefix = self
+            .namespace_to_s3_prefix(namespace)
+            .map_err(|e| format!("Failed to create S3 prefix: {:?}", e))?;
+        
         let list_response = self
             .s3_client
-            .list_objects(&self.bucket, Some(s3_prefix))
+            .list_objects(&self.bucket, Some(&s3_prefix))
             .map_err(|e| format!("Failed to list S3 objects: {:?}", e))?;
         let mut documents = Vec::new();
 
@@ -230,7 +218,7 @@ impl S3DocumentLoaderAgentImpl {
                 last_modified: obj.last_modified,
                 content_type: obj.content_type,
                 bucket: self.bucket.clone(),
-                namespace: String::new(), // Will be set by caller
+                namespace: namespace.to_string(),
             };
 
             documents.push(document);
