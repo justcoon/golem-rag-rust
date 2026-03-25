@@ -39,6 +39,7 @@ impl S3DocumentLoaderAgent for S3DocumentLoaderAgentImpl {
 
         Self { s3_client, bucket }
     }
+
     fn load_documents_from_namespace(&mut self, namespace: String) -> AgentResult<Vec<String>> {
         log::info!("Loading documents from namespace: {}", namespace);
 
