@@ -8,9 +8,9 @@ const formatScore = (score) => (score * 100).toFixed(1) + '%';
 
 const getMatchTypeLabel = (type) => {
   switch (type) {
-    case 'SemanticOnly': return 'Semantic';
-    case 'KeywordOnly': return 'Keyword';
-    case 'BothMatch': return 'Hybrid';
+    case 'semantic-only': return 'Semantic';
+    case 'keyword-only': return 'Keyword';
+    case 'both-match': return 'Hybrid';
     default: return type;
   }
 };

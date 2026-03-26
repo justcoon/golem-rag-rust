@@ -3,6 +3,9 @@ use golem_rust::Schema;
 use golem_wasi_http::{Client, Method};
 use serde::{Deserialize, Serialize};
 
+/// Default embedding dimension for mock embeddings
+pub const DEFAULT_EMBEDDING_DIMENSION: usize = 768;
+
 #[derive(Clone, Debug, Schema, Serialize, Deserialize)]
 pub struct EmbeddingRequest {
     pub model: String,
@@ -88,7 +91,7 @@ impl EmbeddingClient {
         match self.provider {
             EmbeddingProvider::Ollama => self.generate_ollama_embedding(text).await,
             EmbeddingProvider::OpenAI => self.generate_openai_embedding(text).await,
-            EmbeddingProvider::Mock => Ok(Self::mock_embedding(text, 768)),
+            EmbeddingProvider::Mock => Ok(Self::mock_embedding(text, DEFAULT_EMBEDDING_DIMENSION)),
         }
     }
 
@@ -263,11 +266,12 @@ impl EmbeddingClient {
                     Ok(embedding) => Ok(embedding),
                     Err(e) => {
                         log::warn!("Embedding generation failed, using mock: {:?}", e);
-                        Ok(Self::mock_embedding(text, 768)) // Common embedding dimension
+                        Ok(Self::mock_embedding(text, DEFAULT_EMBEDDING_DIMENSION))
+                        // Common embedding dimension
                     }
                 }
             }
-            EmbeddingProvider::Mock => Ok(Self::mock_embedding(text, 768)),
+            EmbeddingProvider::Mock => Ok(Self::mock_embedding(text, DEFAULT_EMBEDDING_DIMENSION)),
         }
     }
 }

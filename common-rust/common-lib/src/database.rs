@@ -11,6 +11,40 @@ pub use golem_rust::bindings::golem::rdbms::postgres::{
     LazyDbValue as PostgresLazyDbValue,
 };
 
+#[macro_export]
+macro_rules! extract_db_field {
+    ($row:expr, $idx:expr, $type:pat => $map:expr) => {
+        try_match::try_match!(&$row.values[$idx], $type => $map)
+            .map_err(|_| anyhow::anyhow!(concat!("Invalid field type at index ", $idx)))?
+    };
+    ($row:expr, $idx:expr, $type:pat => $map:expr, String) => {
+        try_match::try_match!(&$row.values[$idx], $type => $map)
+            .map_err(|_| format!("Invalid field type at index {}", $idx))?
+    };
+}
+
+#[macro_export]
+macro_rules! extract_db_array_field {
+    ($row:expr, $idx:expr, $inner_type:pat => $inner_map:expr) => {{
+        let array = extract_db_field!($row, $idx, $crate::PostgresDbValue::Array(a) => a);
+        array.iter()
+            .map(|lazy_value| match lazy_value.get() {
+                $inner_type => Ok($inner_map),
+                _ => Err(anyhow::anyhow!("Invalid array element type")),
+            })
+            .collect::<Result<Vec<_>, _>>()?
+    }};
+    ($row:expr, $idx:expr, $inner_type:pat => $inner_map:expr, String) => {{
+        let array = extract_db_field!($row, $idx, $crate::PostgresDbValue::Array(a) => a, String);
+        array.iter()
+            .map(|lazy_value| match lazy_value.get() {
+                $inner_type => Ok($inner_map),
+                _ => Err("Invalid array element type".to_string()),
+            })
+            .collect::<std::result::Result<Vec<_>, _>>()?
+    }};
+}
+
 #[derive(Clone, Debug, Schema, Serialize, Deserialize)]
 pub struct PostgresDbConfig {
     pub host: String,
@@ -46,40 +80,6 @@ impl PostgresDbConfig {
 
 pub struct DatabaseHelper {
     pub connection: PostgresDbConnection,
-}
-
-#[macro_export]
-macro_rules! extract_db_field {
-    ($row:expr, $idx:expr, $type:pat => $map:expr) => {
-        try_match::try_match!(&$row.values[$idx], $type => $map)
-            .map_err(|_| anyhow::anyhow!(concat!("Invalid field type at index ", $idx)))?
-    };
-    ($row:expr, $idx:expr, $type:pat => $map:expr, String) => {
-        try_match::try_match!(&$row.values[$idx], $type => $map)
-            .map_err(|_| format!("Invalid field type at index {}", $idx))?
-    };
-}
-
-#[macro_export]
-macro_rules! extract_db_array_field {
-    ($row:expr, $idx:expr, $inner_type:pat => $inner_map:expr) => {{
-        let array = extract_db_field!($row, $idx, $crate::PostgresDbValue::Array(a) => a);
-        array.iter()
-            .map(|lazy_value| match lazy_value.get() {
-                $inner_type => Ok($inner_map),
-                _ => Err(anyhow::anyhow!("Invalid array element type")),
-            })
-            .collect::<Result<Vec<_>, _>>()?
-    }};
-    ($row:expr, $idx:expr, $inner_type:pat => $inner_map:expr, String) => {{
-        let array = extract_db_field!($row, $idx, $crate::PostgresDbValue::Array(a) => a, String);
-        array.iter()
-            .map(|lazy_value| match lazy_value.get() {
-                $inner_type => Ok($inner_map),
-                _ => Err("Invalid array element type".to_string()),
-            })
-            .collect::<std::result::Result<Vec<_>, _>>()?
-    }};
 }
 
 impl DatabaseHelper {
@@ -140,14 +140,14 @@ impl DatabaseHelper {
     }
 
     /// Delete a document and all associated data (chunks, embeddings)
-    /// 
+    ///
     /// # Arguments
     /// * `document_id` - The document ID to delete
     pub fn delete_document(&self, document_id: &str) -> Result<()> {
         log::info!("Deleting document: {}", document_id);
         self.connection.execute(
             "DELETE FROM documents WHERE id = $1",
-            vec![PostgresDbValue::Text(document_id.to_string())]
+            vec![PostgresDbValue::Text(document_id.to_string())],
         )?;
         Ok(())
     }
@@ -265,7 +265,7 @@ impl DatabaseHelper {
     }
 
     pub fn store_embedding(
-        &self, 
+        &self,
         embedding: &Embedding,
         document_id: &str,
         chunk_index: i32,

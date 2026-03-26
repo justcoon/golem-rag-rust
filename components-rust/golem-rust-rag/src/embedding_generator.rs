@@ -171,15 +171,15 @@ impl EmbeddingGeneratorAgent for EmbeddingGeneratorAgentImpl {
 }
 
 struct DocumentEmbeddingGeneratorAgentImpl {
-    embedding_client: Option<EmbeddingClient>,
+    embedding_client: EmbeddingClient,
     chunk_config: ChunkConfig,
 }
 
 #[agent_implementation]
 impl DocumentEmbeddingGeneratorAgent for DocumentEmbeddingGeneratorAgentImpl {
     fn new() -> Self {
-        // Initialize embedding client if available
-        let embedding_client = EmbeddingClient::from_env().ok();
+        let embedding_client = EmbeddingClient::from_env()
+            .expect("Failed to create embedding client from environment");
 
         let chunk_config = ChunkConfig::default();
 
@@ -278,6 +278,7 @@ impl DocumentEmbeddingGeneratorAgent for DocumentEmbeddingGeneratorAgentImpl {
 impl DocumentEmbeddingGeneratorAgentImpl {
     fn chunk_document(
         &self,
+        document_id: &str,
         content: &str,
         config: &ChunkConfig,
     ) -> AgentResult<Vec<DocumentChunk>> {
@@ -322,7 +323,7 @@ impl DocumentEmbeddingGeneratorAgentImpl {
             // Create chunk
             let chunk = DocumentChunk {
                 id: uuid::Uuid::new_v4().to_string(),
-                document_id: String::new(), // Will be set by caller
+                document_id: document_id.to_string(),
                 content: chunk_content.clone(),
                 chunk_index: chunk_index as u32,
                 start_pos: chunk_start as u32,
@@ -381,45 +382,21 @@ impl DocumentEmbeddingGeneratorAgentImpl {
         chunk_index: u32,
         chunk: &DocumentChunk,
     ) -> AgentResult<String> {
-        // Generate embedding using real HTTP client
-        let embedding_vector = match &self.embedding_client {
-            Some(client) => {
-                log::debug!(
-                    "Generating real embedding for chunk: {}",
-                    &chunk.content[..chunk.content.len().min(100)]
-                );
-
-                // Use async call directly
-                match client.generate_embedding(&chunk.content).await {
-                    Ok(embedding) => {
-                        log::debug!(
-                            "Successfully generated real embedding with {} dimensions",
-                            embedding.len()
-                        );
-                        embedding
-                    }
-                    Err(e) => {
-                        log::warn!(
-                            "Failed to generate real embedding, falling back to mock: {:?}",
-                            e
-                        );
-                        EmbeddingClient::mock_embedding(&chunk.content, 768)
-                    }
-                }
-            }
-            None => {
-                log::debug!("No embedding client, using mock embedding");
-                EmbeddingClient::mock_embedding(&chunk.content, 768)
-            }
-        };
+        // Generate embedding using fallback logic
+        log::debug!(
+            "Generating embedding for chunk: {}",
+            &chunk.content[..chunk.content.len().min(100)]
+        );
+        let embedding_vector = self
+            .embedding_client
+            .generate_embedding_with_fallback(&chunk.content)
+            .await
+            .map_err(|e| format!("Failed to generate embedding: {:?}", e))?;
 
         // Store document chunk
-        let mut chunk_with_id = chunk.clone();
-        chunk_with_id.document_id = document_id.to_string();
-
-        if let Err(e) = db_helper.store_document_chunk(&chunk_with_id) {
-            return Err(format!("Failed to store document chunk: {:?}", e));
-        }
+        db_helper
+            .store_document_chunk(chunk)
+            .map_err(|e| format!("Failed to store document chunk: {:?}", e))?;
 
         // Create embedding record with proper mapping to database schema
         let embedding = Embedding {
@@ -440,14 +417,11 @@ impl DocumentEmbeddingGeneratorAgentImpl {
             chunk_index,
             document_id
         );
-        Ok(chunk_with_id.id)
+        Ok(chunk.id.clone())
     }
 
     fn get_model_name(&self) -> String {
-        self.embedding_client
-            .as_ref()
-            .map(|c| c.model.clone())
-            .unwrap_or("unknown".to_string())
+        self.embedding_client.model.clone()
     }
 
     fn create_db_helper(&self) -> AgentResult<DatabaseHelper> {
@@ -483,7 +457,7 @@ impl DocumentEmbeddingGeneratorAgentImpl {
         content: &str,
     ) -> AgentResult<u32> {
         // Split document into chunks
-        let chunks = self.chunk_document(content, &self.chunk_config)?;
+        let chunks = self.chunk_document(document_id, content, &self.chunk_config)?;
 
         // Generate embeddings for each chunk
         let mut embedding_count = 0;
