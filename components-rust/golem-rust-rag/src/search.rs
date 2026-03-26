@@ -126,56 +126,6 @@ impl SearchAgent for SearchAgentImpl {
 }
 
 impl SearchAgentImpl {
-    fn extract_search_result_from_row(
-        &self,
-        row: &PostgresDbRow,
-        query: &str,
-        threshold: Option<f32>,
-    ) -> AgentResult<Option<SearchResult>> {
-        let chunk_id = extract_db_field!(row, 0, PostgresDbValue::Text(id) => id.clone(), String);
-        let document_id =
-            extract_db_field!(row, 1, PostgresDbValue::Text(id) => id.clone(), String);
-        let chunk_index =
-            extract_db_field!(row, 2, PostgresDbValue::Int4(index) => *index as u32, String);
-        let chunk_text =
-            extract_db_field!(row, 3, PostgresDbValue::Text(text) => text.clone(), String);
-        let start_pos =
-            extract_db_field!(row, 4, PostgresDbValue::Int4(pos) => *pos as u32, String);
-        let end_pos = extract_db_field!(row, 5, PostgresDbValue::Int4(pos) => *pos as u32, String);
-        let token_count =
-            extract_db_field!(row, 6, PostgresDbValue::Int4(count) => Some(*count as u32), String);
-        let similarity_score = match &row.values[7] {
-            PostgresDbValue::Float4(score) => *score,
-            PostgresDbValue::Float8(score) => *score as f32,
-            PostgresDbValue::Text(text) => text.parse::<f32>().unwrap_or(0.0),
-            _other => 0.0,
-        };
-
-        // Filter by threshold if provided
-        if let Some(threshold) = threshold {
-            if similarity_score < threshold {
-                return Ok(None);
-            }
-        }
-
-        let document_chunk = DocumentChunk {
-            id: chunk_id,
-            document_id: document_id.clone(),
-            content: chunk_text.clone(),
-            chunk_index,
-            start_pos,
-            end_pos,
-            token_count,
-        };
-
-        let search_result = SearchResult {
-            chunk: document_chunk,
-            similarity_score,
-            relevance_explanation: self.generate_highlight(&chunk_text, query),
-        };
-
-        Ok(Some(search_result))
-    }
 
     async fn generate_query_embedding(&self, query: &str) -> AgentResult<Vec<f32>> {
         let embedding_client = EmbeddingClient::from_env().map_err(|e| {
@@ -219,10 +169,10 @@ impl SearchAgentImpl {
         let sql_query = format!(
             r#"
             SELECT 
-                dc.id as chunk_id,
+                dc.id,
                 dc.document_id,
                 dc.chunk_index,
-                dc.content as chunk_text,
+                dc.content,
                 dc.start_pos,
                 dc.end_pos,
                 dc.token_count,
@@ -251,14 +201,13 @@ impl SearchAgentImpl {
             )
             .map_err(|e| format!("Failed to execute vector search query: {:?}", e))?;
 
-        let mut search_results = Vec::new();
+        use common_lib::decode::DbResultDecoder;
+        let mut search_results = SearchResult::decode_result(result)
+            .map_err(|e| format!("Failed to decode search results: {:?}", e))?;
 
-        for row in result.rows {
-            if let Some(result) =
-                self.extract_search_result_from_row(&row, query, Some(threshold))?
-            {
-                search_results.push(result);
-            }
+        // Add highlights
+        for result in &mut search_results {
+            result.relevance_explanation = self.generate_highlight(&result.chunk.content, query);
         }
 
         Ok(search_results)
@@ -281,23 +230,13 @@ impl SearchAgentImpl {
             .query(query, vec![PostgresDbValue::Text(document_id.to_string())])
             .map_err(|e| format!("Failed to get document embedding: {:?}", e))?;
 
-        if result.rows.is_empty() {
-            return Err("Document embedding not found".to_string());
-        }
-
-        // Get the embedding vector from the database
-        let embedding: Vec<f32> = extract_db_array_field!(
-            result.rows[0],
-            0,
-            v => match v {
-                PostgresDbValue::Float4(value) => value,
-                PostgresDbValue::Float8(value) => value as f32,
-                _ => return Err("Invalid embedding type: expected Float4 or Float8".to_string()),
-            },
-            String
-        );
-
-        Ok(embedding)
+        use common_lib::decode::{DbResultDecoder, Single};
+        Single::<Vec<f32>>::decode_result(result)
+            .map_err(|e| format!("Failed to decode embedding: {:?}", e))?
+            .into_iter()
+            .next()
+            .map(|s| s.0)
+            .ok_or_else(|| "Document embedding not found".to_string())
     }
 
     fn build_filter_conditions(&self, filters: &SearchFilters) -> String {
@@ -388,18 +327,18 @@ impl SearchAgentImpl {
         let sql_query = format!(
             r#"
             SELECT 
-                dc.id as chunk_id,
+                dc.id,
                 dc.document_id,
                 dc.chunk_index,
-                dc.content as chunk_text,
+                dc.content,
                 dc.start_pos,
                 dc.end_pos,
                 dc.token_count,
-                ts_rank_cd(to_tsvector('english', dc.content), plainto_tsquery('english', $1)) as keyword_score
+                ts_rank_cd(to_tsvector('english', dc.content), plainto_tsquery('english', $1)) as similarity_score
             FROM document_chunks dc
             WHERE {}
               AND to_tsvector('english', dc.content) @@ plainto_tsquery('english', $1)
-            ORDER BY keyword_score DESC
+            ORDER BY similarity_score DESC
             LIMIT $2
             "#,
             filter_conditions
@@ -416,12 +355,13 @@ impl SearchAgentImpl {
             )
             .map_err(|e| format!("Failed to execute keyword search query: {:?}", e))?;
 
-        let mut search_results = Vec::new();
+        use common_lib::decode::DbResultDecoder;
+        let mut search_results = SearchResult::decode_result(result)
+            .map_err(|e| format!("Failed to decode search results: {:?}", e))?;
 
-        for row in result.rows {
-            if let Some(result) = self.extract_search_result_from_row(&row, query, None)? {
-                search_results.push(result);
-            }
+        // Add highlights
+        for result in &mut search_results {
+            result.relevance_explanation = self.generate_highlight(&result.chunk.content, query);
         }
 
         Ok(search_results)

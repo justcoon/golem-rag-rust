@@ -2,48 +2,330 @@ use crate::models::*;
 use anyhow::Result;
 use golem_rust::Schema;
 use serde::{Deserialize, Serialize};
-use std::str::FromStr;
 
 // Re-export Golem RDBMS types for convenience
 pub use golem_rust::bindings::golem::rdbms::postgres::{
-    DbColumnType as PostgresDbColumnType, DbConnection as PostgresDbConnection,
-    DbRow as PostgresDbRow, DbTransaction as PostgresDbTransaction, DbValue as PostgresDbValue,
+    DbColumn as PostgresDbColumn, DbColumnType as PostgresDbColumnType,
+    DbConnection as PostgresDbConnection, DbResult as PostgresDbResult, DbRow as PostgresDbRow,
+    DbTransaction as PostgresDbTransaction, DbValue as PostgresDbValue,
     LazyDbValue as PostgresLazyDbValue,
 };
 
-#[macro_export]
-macro_rules! extract_db_field {
-    ($row:expr, $idx:expr, $type:pat => $map:expr) => {
-        try_match::try_match!(&$row.values[$idx], $type => $map)
-            .map_err(|_| anyhow::anyhow!(concat!("Invalid field type at index ", $idx)))?
-    };
-    ($row:expr, $idx:expr, $type:pat => $map:expr, String) => {
-        try_match::try_match!(&$row.values[$idx], $type => $map)
-            .map_err(|_| format!("Invalid field type at index {}", $idx))?
-    };
+pub mod decode {
+    use super::*;
+
+    pub trait DbValueDecoder: Sized {
+        fn decode(value: &PostgresDbValue) -> anyhow::Result<Self>;
+    }
+
+    /// A wrapper for types that should be decoded from JSON/JSONB
+    #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+    pub struct Json<T>(pub T);
+
+    impl<T: serde::de::DeserializeOwned> DbValueDecoder for Json<T> {
+        fn decode(value: &PostgresDbValue) -> anyhow::Result<Self> {
+            match value {
+                PostgresDbValue::Jsonb(s) | PostgresDbValue::Json(s) => serde_json::from_str(s)
+                    .map(Json)
+                    .map_err(|e| anyhow::anyhow!("Failed to parse JSON: {}", e)),
+                _ => Err(anyhow::anyhow!("Expected Jsonb or Json, got {:?}", value)),
+            }
+        }
+    }
+
+    /// A wrapper for single-column results
+    #[derive(Debug, Clone)]
+    pub struct Single<T>(pub T);
+
+    impl<T: DbValueDecoder> DbRowDecoder for Single<T> {
+        fn decode_row(row: &PostgresDbRow, _columns: &[PostgresDbColumn]) -> anyhow::Result<Self> {
+            let value = row
+                .values
+                .first()
+                .ok_or_else(|| anyhow::anyhow!("Row is empty"))?;
+            T::decode(value).map(Single)
+        }
+    }
+
+    // Tuple implementations
+    impl<T1: DbValueDecoder, T2: DbValueDecoder> DbRowDecoder for (T1, T2) {
+        fn decode_row(row: &PostgresDbRow, _columns: &[PostgresDbColumn]) -> anyhow::Result<Self> {
+            let v1 = T1::decode(
+                row.values
+                    .first()
+                    .ok_or_else(|| anyhow::anyhow!("Missing column 0"))?,
+            )?;
+            let v2 = T2::decode(
+                row.values
+                    .get(1)
+                    .ok_or_else(|| anyhow::anyhow!("Missing column 1"))?,
+            )?;
+            Ok((v1, v2))
+        }
+    }
+
+    impl<T1: DbValueDecoder, T2: DbValueDecoder, T3: DbValueDecoder> DbRowDecoder for (T1, T2, T3) {
+        fn decode_row(row: &PostgresDbRow, _columns: &[PostgresDbColumn]) -> anyhow::Result<Self> {
+            let v1 = T1::decode(
+                row.values
+                    .first()
+                    .ok_or_else(|| anyhow::anyhow!("Missing column 0"))?,
+            )?;
+            let v2 = T2::decode(
+                row.values
+                    .get(1)
+                    .ok_or_else(|| anyhow::anyhow!("Missing column 1"))?,
+            )?;
+            let v3 = T3::decode(
+                row.values
+                    .get(2)
+                    .ok_or_else(|| anyhow::anyhow!("Missing column 2"))?,
+            )?;
+            Ok((v1, v2, v3))
+        }
+    }
+
+    impl<T1: DbValueDecoder, T2: DbValueDecoder, T3: DbValueDecoder, T4: DbValueDecoder> DbRowDecoder
+        for (T1, T2, T3, T4)
+    {
+        fn decode_row(row: &PostgresDbRow, _columns: &[PostgresDbColumn]) -> anyhow::Result<Self> {
+            let v1 = T1::decode(
+                row.values
+                    .first()
+                    .ok_or_else(|| anyhow::anyhow!("Missing column 0"))?,
+            )?;
+            let v2 = T2::decode(
+                row.values
+                    .get(1)
+                    .ok_or_else(|| anyhow::anyhow!("Missing column 1"))?,
+            )?;
+            let v3 = T3::decode(
+                row.values
+                    .get(2)
+                    .ok_or_else(|| anyhow::anyhow!("Missing column 2"))?,
+            )?;
+            let v4 = T4::decode(
+                row.values
+                    .get(3)
+                    .ok_or_else(|| anyhow::anyhow!("Missing column 3"))?,
+            )?;
+            Ok((v1, v2, v3, v4))
+        }
+    }
+
+    #[macro_export]
+    macro_rules! db_value_decoder_json {
+        ($t:ty) => {
+            impl $crate::database::decode::DbValueDecoder for $t {
+                fn decode(
+                    value: &$crate::database::PostgresDbValue,
+                ) -> anyhow::Result<Self> {
+                    match value {
+                        $crate::database::PostgresDbValue::Jsonb(s)
+                        | $crate::database::PostgresDbValue::Json(s) => serde_json::from_str(s)
+                            .map_err(|e| {
+                                anyhow::anyhow!(
+                                    "Failed to parse JSON for {}: {}",
+                                    stringify!($t),
+                                    e
+                                )
+                            }),
+                        _ => Err(anyhow::anyhow!(
+                            "Expected Jsonb or Json for {}, got {:?}",
+                            stringify!($t),
+                            value
+                        )),
+                    }
+                }
+            }
+        };
+    }
+
+    pub trait DbRowDecoder: Sized {
+        fn decode_row(row: &PostgresDbRow, columns: &[PostgresDbColumn]) -> anyhow::Result<Self>;
+
+        fn find_column_index(columns: &[PostgresDbColumn], name: &str) -> anyhow::Result<usize> {
+            columns
+                .iter()
+                .position(|c| c.name == name)
+                .ok_or_else(|| anyhow::anyhow!("Column {} not found", name))
+        }
+
+        fn decode_field<T: DbValueDecoder>(
+            row: &PostgresDbRow,
+            idx: usize,
+            field_name: &str,
+        ) -> anyhow::Result<T> {
+            let value = row
+                .values
+                .get(idx)
+                .ok_or_else(|| anyhow::anyhow!("Field index {} out of bounds for row", idx))?;
+            DbValueDecoder::decode(value)
+                .map_err(|e| anyhow::anyhow!("Error decoding field '{}': {}", field_name, e))
+        }
+    }
+
+    pub trait DbResultDecoder: Sized {
+        fn decode_result(result: PostgresDbResult) -> anyhow::Result<Vec<Self>>;
+    }
+
+    impl<T: DbRowDecoder> DbResultDecoder for T {
+        fn decode_result(result: PostgresDbResult) -> anyhow::Result<Vec<Self>> {
+            result
+                .rows
+                .iter()
+                .map(|row| T::decode_row(row, &result.columns))
+                .collect()
+        }
+    }
+
+    #[macro_export]
+    macro_rules! db_row_decoder {
+        ($struct_name:ident { $($field:ident),* $(,)? }) => {
+            impl $crate::database::decode::DbRowDecoder for $struct_name {
+                fn decode_row(
+                    row: &$crate::database::PostgresDbRow,
+                    columns: &[$crate::database::PostgresDbColumn],
+                ) -> anyhow::Result<Self> {
+                    let find_idx = |name: &str| {
+                        <Self as $crate::database::decode::DbRowDecoder>::find_column_index(columns, name)
+                    };
+
+                    Ok(Self {
+                        $(
+                            $field: {
+                                let idx = find_idx(stringify!($field))?;
+                                <Self as $crate::database::decode::DbRowDecoder>::decode_field(row, idx, stringify!($field))?
+                            },
+                        )*
+                    })
+                }
+            }
+        };
+    }
+
+    // Implementations for common types
+    impl DbValueDecoder for String {
+        fn decode(value: &PostgresDbValue) -> anyhow::Result<Self> {
+            match value {
+                PostgresDbValue::Text(s) => Ok(s.clone()),
+                PostgresDbValue::Varchar(s) => Ok(s.clone()),
+                _ => Err(anyhow::anyhow!("Expected Text or Varchar, got {:?}", value)),
+            }
+        }
+    }
+
+    impl DbValueDecoder for bool {
+        fn decode(value: &PostgresDbValue) -> anyhow::Result<Self> {
+            match value {
+                PostgresDbValue::Boolean(b) => Ok(*b),
+                _ => Err(anyhow::anyhow!("Expected Boolean, got {:?}", value)),
+            }
+        }
+    }
+
+    impl DbValueDecoder for i64 {
+        fn decode(value: &PostgresDbValue) -> anyhow::Result<Self> {
+            match value {
+                PostgresDbValue::Int8(i) => Ok(*i),
+                PostgresDbValue::Int4(i) => Ok(*i as i64),
+                PostgresDbValue::Int2(i) => Ok(*i as i64),
+                _ => Err(anyhow::anyhow!("Expected Int8, Int4 or Int2 (for i64), got {:?}", value)),
+            }
+        }
+    }
+
+    impl DbValueDecoder for i32 {
+        fn decode(value: &PostgresDbValue) -> anyhow::Result<Self> {
+            match value {
+                PostgresDbValue::Int4(i) => Ok(*i),
+                PostgresDbValue::Int2(i) => Ok(*i as i32),
+                _ => Err(anyhow::anyhow!("Expected Int4 or Int2 (for i32), got {:?}", value)),
+            }
+        }
+    }
+
+    impl DbValueDecoder for u64 {
+        fn decode(value: &PostgresDbValue) -> anyhow::Result<Self> {
+            match value {
+                PostgresDbValue::Int8(i) => Ok(*i as u64),
+                PostgresDbValue::Int4(i) => Ok(*i as u64),
+                _ => Err(anyhow::anyhow!("Expected Int8 or Int4 (for u64), got {:?}", value)),
+            }
+        }
+    }
+
+    impl DbValueDecoder for f32 {
+        fn decode(value: &PostgresDbValue) -> anyhow::Result<Self> {
+            match value {
+                PostgresDbValue::Float4(f) => Ok(*f),
+                PostgresDbValue::Float8(f) => Ok(*f as f32),
+                _ => Err(anyhow::anyhow!("Expected Float4 or Float8 (for f32), got {:?}", value)),
+            }
+        }
+    }
+
+    impl DbValueDecoder for f64 {
+        fn decode(value: &PostgresDbValue) -> anyhow::Result<Self> {
+            match value {
+                PostgresDbValue::Float8(f) => Ok(*f),
+                PostgresDbValue::Float4(f) => Ok(*f as f64),
+                _ => Err(anyhow::anyhow!("Expected Float8 or Float4 (for f64), got {:?}", value)),
+            }
+        }
+    }
+
+    impl DbValueDecoder for i16 {
+        fn decode(value: &PostgresDbValue) -> anyhow::Result<Self> {
+            match value {
+                PostgresDbValue::Int2(i) => Ok(*i),
+                _ => Err(anyhow::anyhow!("Expected Int2, got {:?}", value)),
+            }
+        }
+    }
+
+    impl DbValueDecoder for u32 {
+        fn decode(value: &PostgresDbValue) -> anyhow::Result<Self> {
+            match value {
+                PostgresDbValue::Oid(o) => Ok(*o),
+                PostgresDbValue::Int4(i) => Ok(*i as u32),
+                _ => Err(anyhow::anyhow!("Expected Oid or Int4 (for u32), got {:?}", value)),
+            }
+        }
+    }
+
+    impl DbValueDecoder for Vec<u8> {
+        fn decode(value: &PostgresDbValue) -> anyhow::Result<Self> {
+            match value {
+                PostgresDbValue::Bytea(b) => Ok(b.clone()),
+                _ => Err(anyhow::anyhow!("Expected Bytea, got {:?}", value)),
+            }
+        }
+    }
+
+    impl<T: DbValueDecoder> DbValueDecoder for Option<T> {
+        fn decode(value: &PostgresDbValue) -> anyhow::Result<Self> {
+            match value {
+                PostgresDbValue::Null => Ok(None),
+                _ => T::decode(value).map(Some),
+            }
+        }
+    }
+
+    impl<T: DbValueDecoder> DbValueDecoder for Vec<T> {
+        fn decode(value: &PostgresDbValue) -> anyhow::Result<Self> {
+            match value {
+                PostgresDbValue::Array(vals) => vals
+                    .iter()
+                    .map(|lazy| T::decode(&lazy.get()))
+                    .collect::<anyhow::Result<Vec<_>>>(),
+                _ => Err(anyhow::anyhow!("Expected Array, got {:?}", value)),
+            }
+        }
+    }
 }
 
-#[macro_export]
-macro_rules! extract_db_array_field {
-    ($row:expr, $idx:expr, $inner_type:pat => $inner_map:expr) => {{
-        let array = extract_db_field!($row, $idx, $crate::PostgresDbValue::Array(a) => a);
-        array.iter()
-            .map(|lazy_value| match lazy_value.get() {
-                $inner_type => Ok($inner_map),
-                _ => Err(anyhow::anyhow!("Invalid array element type")),
-            })
-            .collect::<Result<Vec<_>, _>>()?
-    }};
-    ($row:expr, $idx:expr, $inner_type:pat => $inner_map:expr, String) => {{
-        let array = extract_db_field!($row, $idx, $crate::PostgresDbValue::Array(a) => a, String);
-        array.iter()
-            .map(|lazy_value| match lazy_value.get() {
-                $inner_type => Ok($inner_map),
-                _ => Err("Invalid array element type".to_string()),
-            })
-            .collect::<std::result::Result<Vec<_>, _>>()?
-    }};
-}
+
 
 #[derive(Clone, Debug, Schema, Serialize, Deserialize)]
 pub struct PostgresDbConfig {
@@ -181,38 +463,9 @@ impl DatabaseHelper {
             .connection
             .query(query, vec![PostgresDbValue::Text(document_id.to_string())])?;
 
-        if result.rows.is_empty() {
-            return Ok(None);
-        }
-
-        let row = &result.rows[0];
-
-        // Use macro for simple fields
-        let id = extract_db_field!(row, 0, PostgresDbValue::Text(id) => id.clone());
-        let title = extract_db_field!(row, 1, PostgresDbValue::Text(title) => title.clone());
-        let content = extract_db_field!(row, 2, PostgresDbValue::Text(content) => content.clone());
-        let metadata_str = extract_db_field!(row, 3, PostgresDbValue::Jsonb(m) => m.clone());
-        let source = extract_db_field!(row, 4, PostgresDbValue::Text(s) => s.clone());
-        let namespace = extract_db_field!(row, 5, PostgresDbValue::Text(n) => n.clone());
-        let tags = extract_db_array_field!(row, 6, PostgresDbValue::Text(t) => t.clone());
-        let size_bytes = extract_db_field!(row, 7, PostgresDbValue::Int8(s) => *s);
-        let created_at = extract_db_field!(row, 8, PostgresDbValue::Text(c) => c.clone());
-        let updated_at = extract_db_field!(row, 9, PostgresDbValue::Text(u) => u.clone());
-
-        let metadata: DocumentMetadata = serde_json::from_str(&metadata_str)?;
-
-        Ok(Some(Document {
-            id,
-            title,
-            content,
-            source,
-            namespace,
-            tags,
-            size_bytes: size_bytes as u64,
-            created_at,
-            updated_at,
-            metadata,
-        }))
+        use crate::database::decode::DbResultDecoder;
+        let documents = Document::decode_result(result)?;
+        Ok(documents.into_iter().next())
     }
 
     pub fn document_exists(&self, document_id: &str) -> Result<bool> {
@@ -221,12 +474,9 @@ impl DatabaseHelper {
             .connection
             .query(query, vec![PostgresDbValue::Text(document_id.to_string())])?;
 
-        if result.rows.is_empty() {
-            return Ok(false);
-        }
-
-        let count = extract_db_field!(result.rows[0], 0, PostgresDbValue::Int8(count) => *count);
-        Ok(count > 0)
+        use crate::database::decode::{DbResultDecoder, Single};
+        let counts = Single::<i64>::decode_result(result)?;
+        Ok(counts.first().map(|s| s.0 > 0).unwrap_or(false))
     }
 
     pub fn update_embedding_status(
@@ -248,20 +498,19 @@ impl DatabaseHelper {
     }
 
     pub fn get_embedding_status(&self, document_id: &str) -> Result<EmbeddingStatus> {
-        let query = "SELECT embedding_status, chunk_count FROM document_embeddings WHERE document_id = $1 LIMIT 1";
+        let query =
+            "SELECT embedding_status FROM document_embeddings WHERE document_id = $1 LIMIT 1";
         let result = self
             .connection
             .query(query, vec![PostgresDbValue::Text(document_id.to_string())])?;
 
-        if result.rows.is_empty() {
-            return Ok(EmbeddingStatus::NotProcessed);
-        }
-
-        let row = &result.rows[0];
-        let status_str = extract_db_field!(row, 0, PostgresDbValue::Text(status) => status.clone());
-
-        EmbeddingStatus::from_str(&status_str)
-            .map_err(|e| anyhow::anyhow!("Failed to parse embedding status: {}", e))
+        use crate::database::decode::{DbResultDecoder, Single};
+        let status = Single::<EmbeddingStatus>::decode_result(result)?;
+        Ok(status
+            .into_iter()
+            .next()
+            .map(|s| s.0)
+            .unwrap_or(EmbeddingStatus::NotProcessed))
     }
 
     pub fn store_embedding(

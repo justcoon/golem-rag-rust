@@ -292,17 +292,11 @@ impl S3DocumentLoaderAgentImpl {
             ],
         )?;
 
-        if result.rows.is_empty() {
-            return Ok(None);
-        }
+        use common_lib::decode::DbResultDecoder;
+        let results: Vec<(String, Option<String>)> =
+            <(String, Option<String>)>::decode_result(result)
+                .map_err(|e| anyhow::anyhow!("Failed to decode document info: {:?}", e))?;
 
-        let id = extract_db_field!(result.rows[0], 0, PostgresDbValue::Text(id) => id.clone());
-        // JSONB ->> operator can return NULL, so we handle it with Option
-        let last_modified = match &result.rows[0].values[1] {
-            PostgresDbValue::Text(lm) if !lm.is_empty() => Some(lm.clone()),
-            _ => None,
-        };
-
-        Ok(Some((id, last_modified)))
+        Ok(results.into_iter().next())
     }
 }

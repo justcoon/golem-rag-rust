@@ -18,7 +18,6 @@ wstd = { workspace = true }
 # RAG and Vector Search dependencies
 uuid = { workspace = true }
 anyhow = { workspace = true }
-try_match = { workspace = true }
 
 # S3 Client dependencies
 chrono = { version = "0.4", features = ["serde"] }

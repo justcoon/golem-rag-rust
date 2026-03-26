@@ -1,6 +1,9 @@
 use golem_rust::Schema;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::str::FromStr;
+use crate::database::{PostgresDbColumn, PostgresDbRow, PostgresDbValue, decode::DbValueDecoder, decode::DbRowDecoder};
+
 
 #[derive(Clone, Debug, Schema, Serialize, Deserialize)]
 pub struct Document {
@@ -22,6 +25,22 @@ pub struct DocumentMetadata {
     pub source_metadata: HashMap<String, String>,
     pub metadata: HashMap<String, String>,
 }
+
+crate::db_value_decoder_json!(DocumentMetadata);
+
+crate::db_row_decoder!(Document {
+    id,
+    title,
+    content,
+    source,
+    namespace,
+    tags,
+    size_bytes,
+    created_at,
+    updated_at,
+    metadata,
+});
+
 
 #[derive(Clone, Debug, Schema, Serialize, Deserialize)]
 pub enum ContentType {
@@ -66,6 +85,14 @@ impl std::str::FromStr for EmbeddingStatus {
     }
 }
 
+impl DbValueDecoder for EmbeddingStatus {
+    fn decode(value: &PostgresDbValue) -> anyhow::Result<Self> {
+        let status_str = String::decode(value)?;
+        Self::from_str(&status_str).map_err(|e: String| anyhow::anyhow!(e))
+    }
+}
+
+
 impl std::fmt::Display for EmbeddingStatus {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -109,6 +136,17 @@ pub struct DocumentChunk {
     pub token_count: Option<u32>,
 }
 
+crate::db_row_decoder!(DocumentChunk {
+    id,
+    document_id,
+    content,
+    chunk_index,
+    start_pos,
+    end_pos,
+    token_count,
+});
+
+
 #[derive(Clone, Debug, Schema, Serialize, Deserialize)]
 pub struct Embedding {
     pub id: String,
@@ -124,6 +162,19 @@ pub struct SearchResult {
     pub similarity_score: f32,
     pub relevance_explanation: Option<String>,
 }
+
+impl DbRowDecoder for SearchResult {
+    fn decode_row(row: &PostgresDbRow, columns: &[PostgresDbColumn]) -> anyhow::Result<Self> {
+        let chunk = DocumentChunk::decode_row(row, columns)?;
+        let similarity_score = Self::decode_field(row, Self::find_column_index(columns, "similarity_score")?, "similarity_score")?;
+        Ok(SearchResult {
+            chunk,
+            similarity_score,
+            relevance_explanation: None, 
+        })
+    }
+}
+
 
 #[derive(Clone, Debug, Schema, Serialize, Deserialize)]
 pub struct SearchQuery {
