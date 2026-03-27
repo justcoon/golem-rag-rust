@@ -1,3 +1,4 @@
+use common_lib::{DbRowDecoder, DbValueDecoder, PostgresDbColumn, PostgresDbRow, PostgresDbValue};
 use golem_rust::Schema;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -22,6 +23,22 @@ pub struct DocumentMetadata {
     pub source_metadata: HashMap<String, String>,
     pub metadata: HashMap<String, String>,
 }
+
+common_lib::db_value_decoder_json!(DocumentMetadata);
+common_lib::db_value_encoder_json!(DocumentMetadata);
+
+common_lib::db_row_decoder!(Document {
+    id,
+    title,
+    content,
+    source,
+    namespace,
+    tags,
+    size_bytes,
+    created_at,
+    updated_at,
+    metadata,
+});
 
 #[derive(Clone, Debug, Schema, Serialize, Deserialize)]
 pub enum ContentType {
@@ -63,6 +80,14 @@ impl std::str::FromStr for EmbeddingStatus {
         } else {
             Ok(EmbeddingStatus::NotProcessed)
         }
+    }
+}
+
+impl DbValueDecoder for EmbeddingStatus {
+    fn decode(value: &PostgresDbValue) -> anyhow::Result<Self> {
+        let status_str = String::decode(value)?;
+        use std::str::FromStr;
+        Self::from_str(&status_str).map_err(|e: String| anyhow::anyhow!(e))
     }
 }
 
@@ -109,6 +134,16 @@ pub struct DocumentChunk {
     pub token_count: Option<u32>,
 }
 
+common_lib::db_row_decoder!(DocumentChunk {
+    id,
+    document_id,
+    content,
+    chunk_index,
+    start_pos,
+    end_pos,
+    token_count,
+});
+
 #[derive(Clone, Debug, Schema, Serialize, Deserialize)]
 pub struct Embedding {
     pub id: String,
@@ -123,6 +158,22 @@ pub struct SearchResult {
     pub chunk: DocumentChunk,
     pub similarity_score: f32,
     pub relevance_explanation: Option<String>,
+}
+
+impl DbRowDecoder for SearchResult {
+    fn decode_row(row: &PostgresDbRow, columns: &[PostgresDbColumn]) -> anyhow::Result<Self> {
+        let chunk = DocumentChunk::decode_row(row, columns)?;
+        let similarity_score = Self::decode_field(
+            row,
+            Self::find_column_index(columns, "similarity_score")?,
+            "similarity_score",
+        )?;
+        Ok(SearchResult {
+            chunk,
+            similarity_score,
+            relevance_explanation: None,
+        })
+    }
 }
 
 #[derive(Clone, Debug, Schema, Serialize, Deserialize)]

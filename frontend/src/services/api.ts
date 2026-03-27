@@ -1,7 +1,11 @@
+import type { SearchFilters, HybridSearchConfig, SearchOptions } from '../types/search';
+
 const API_BASE_URL = '/api';
 
 export const ApiService = {
-  async hybridSearch(query, { filters = null, limit = 10, threshold = 0.5, config = null } = {}) {
+  async hybridSearch(query: string, options: SearchOptions = {}) {
+    const { filters = null, limit = 10, threshold = 0.5, config = null } = options;
+    
     try {
       const response = await fetch(`${API_BASE_URL}/search`, {
         method: 'POST',

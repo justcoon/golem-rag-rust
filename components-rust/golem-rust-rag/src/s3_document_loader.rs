@@ -1,6 +1,7 @@
-extern crate common_lib;
+use crate::database_helper::DatabaseHelperRagext;
+use crate::models::*;
 use chrono::DateTime;
-use common_lib::*;
+use common_lib::{encode_params, DatabaseHelper, S3Client, S3DocumentSource};
 use golem_rust::{agent_definition, agent_implementation};
 use std::string::String;
 use uuid::Uuid;
@@ -199,7 +200,7 @@ impl S3DocumentLoaderAgentImpl {
         let s3_prefix = self
             .namespace_to_s3_prefix(namespace)
             .map_err(|e| format!("Failed to create S3 prefix: {:?}", e))?;
-        
+
         let list_response = self
             .s3_client
             .list_objects(&self.bucket, Some(&s3_prefix))
@@ -284,25 +285,15 @@ impl S3DocumentLoaderAgentImpl {
         db_helper: &DatabaseHelper,
     ) -> anyhow::Result<Option<(String, Option<String>)>> {
         let query = "SELECT id, metadata->'source_metadata'->>'last_modified' FROM documents WHERE metadata->'source_metadata'->>'s3_key' = $1 AND source = 's3' AND namespace = $2";
-        let result = db_helper.connection.query(
-            query,
-            vec![
-                PostgresDbValue::Text(s3_key.to_string()),
-                PostgresDbValue::Text(namespace.to_string()),
-            ],
-        )?;
+        let result = db_helper
+            .connection
+            .query(query, encode_params![s3_key, namespace])?;
 
-        if result.rows.is_empty() {
-            return Ok(None);
-        }
+        use common_lib::decode::DbResultDecoder;
+        let results: Vec<(String, Option<String>)> =
+            <(String, Option<String>)>::decode_result(result)
+                .map_err(|e| anyhow::anyhow!("Failed to decode document info: {:?}", e))?;
 
-        let id = extract_db_field!(result.rows[0], 0, PostgresDbValue::Text(id) => id.clone());
-        // JSONB ->> operator can return NULL, so we handle it with Option
-        let last_modified = match &result.rows[0].values[1] {
-            PostgresDbValue::Text(lm) if !lm.is_empty() => Some(lm.clone()),
-            _ => None,
-        };
-
-        Ok(Some((id, last_modified)))
+        Ok(results.into_iter().next())
     }
 }

@@ -1,5 +1,7 @@
+use crate::database_helper::DatabaseHelperRagext;
+use crate::models::*;
 use chrono::Utc;
-use common_lib::*;
+use common_lib::{DatabaseHelper, EmbeddingClient, PostgresDbConfig};
 use futures::future;
 use golem_rust::{agent_definition, agent_implementation};
 use std::string::String;
@@ -140,13 +142,11 @@ impl EmbeddingGeneratorAgent for EmbeddingGeneratorAgentImpl {
             .query(query, vec![])
             .map_err(|e| format!("Failed to query documents without embeddings: {:?}", e))?;
 
-        let document_ids: Vec<String> = result
-            .rows
-            .iter()
-            .map(|row| match &row.values[0] {
-                PostgresDbValue::Text(id) => id.clone(),
-                _ => "unknown".to_string(),
-            })
+        use common_lib::decode::{DbResultDecoder, Single};
+        let document_ids: Vec<String> = Single::<String>::decode_result(result)
+            .map_err(|e| format!("Failed to decode document IDs: {:?}", e))?
+            .into_iter()
+            .map(|s| s.0)
             .collect();
 
         log::info!("Found {} documents without embeddings", document_ids.len());
