@@ -112,15 +112,44 @@ const formatDateForPostgres = (date: Date, endOfDay = false) => {
 };
 
 watch(dateRange, (newRange) => {
-  if (newRange.start || newRange.end) {
-    const startDate = newRange.start ? formatDateForPostgres(new Date(newRange.start)) : null;
-    const endDate = newRange.end ? formatDateForPostgres(new Date(newRange.end), true) : null;
+  // Only apply date filter if both start and end dates are defined
+  if (newRange.start && newRange.end) {
+    const startDate = formatDateForPostgres(new Date(newRange.start));
+    const endDate = formatDateForPostgres(new Date(newRange.end), true);
     
     filters.value['date-range'] = { 
-      start: startDate || '', 
-      end: endDate || '' 
+      start: startDate, 
+      end: endDate 
+    };
+  } else if (newRange.start && !newRange.end) {
+    // Auto-set end date to today when only start date is provided
+    const today = new Date();
+    const startDate = formatDateForPostgres(new Date(newRange.start));
+    const endDate = formatDateForPostgres(today, true);
+    
+    // Update the dateRange ref to show the auto-set end date
+    dateRange.value.end = today.toISOString().split('T')[0];
+    
+    filters.value['date-range'] = { 
+      start: startDate, 
+      end: endDate 
+    };
+  } else if (!newRange.start && newRange.end) {
+    // Auto-set start date to beginning of year when only end date is provided
+    const endDate = new Date(newRange.end);
+    const startOfYear = new Date(endDate.getFullYear(), 0, 1);
+    const startDate = formatDateForPostgres(startOfYear);
+    const formattedEndDate = formatDateForPostgres(endDate, true);
+    
+    // Update the dateRange ref to show the auto-set start date
+    dateRange.value.start = startOfYear.toISOString().split('T')[0];
+    
+    filters.value['date-range'] = { 
+      start: startDate, 
+      end: formattedEndDate 
     };
   } else {
+    // Clear date filter if no dates are selected
     filters.value['date-range'] = null;
   }
 }, { deep: true });
