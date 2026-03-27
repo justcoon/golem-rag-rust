@@ -246,9 +246,15 @@ impl SearchAgentImpl {
         }
 
         if !filters.tags.is_empty() {
-            for tag in &filters.tags {
-                conditions.push(format!("EXISTS (SELECT 1 FROM documents d WHERE d.id = dc.document_id AND d.tags ? '{}')", tag));
-            }
+            let placeholders: Vec<String> = filters
+                .tags
+                .iter()
+                .map(|tag| format!("'{}'", tag))
+                .collect();
+            conditions.push(format!(
+                "EXISTS (SELECT 1 FROM documents d WHERE d.id = dc.document_id AND d.tags && ARRAY[{}])",
+                placeholders.join(", ")
+            ));
         }
 
         if !filters.sources.is_empty() {

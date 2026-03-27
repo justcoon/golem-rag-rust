@@ -1,9 +1,10 @@
-<script setup>
+<script setup lang="ts">
 import { ref } from 'vue';
 import { ApiService } from './services/api';
 import SearchBar from './components/SearchBar.vue';
 import ResultCard from './components/ResultCard.vue';
 import DocumentModal from './components/DocumentModal.vue';
+import type { SearchFilters as SearchFiltersType, HybridSearchConfig } from './types/search';
 
 const results = ref([]);
 const loading = ref(false);
@@ -12,13 +13,13 @@ const error = ref(null);
 const selectedDocument = ref(null);
 const showModal = ref(false);
 
-const onSearch = async (query, config) => {
+const onSearch = async (query: string, config: HybridSearchConfig, filters: SearchFiltersType | null) => {
   loading.value = true;
   error.value = null;
   results.value = [];
   
   try {
-    results.value = await ApiService.hybridSearch(query, { config });
+    results.value = await ApiService.hybridSearch(query, { filters, config });
   } catch (err) {
     error.value = "Failed to fetch results. Is the Golem server running?";
   } finally {
