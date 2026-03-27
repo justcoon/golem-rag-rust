@@ -77,7 +77,8 @@ impl DocumentAgent for DocumentAgentImpl {
     }
 
     fn get_document_metadata(&self, document_id: String) -> AgentResult<Option<DocumentMetadata>> {
-        self.get_document(document_id).map(|opt| opt.map(|doc| doc.metadata))
+        self.get_document(document_id)
+            .map(|opt| opt.map(|doc| doc.metadata))
     }
 
     fn list_documents(
@@ -114,7 +115,7 @@ impl DocumentAgent for DocumentAgentImpl {
 
         let result = db_helper
             .connection
-            .query(query, vec![PostgresDbValue::Text(document_id.to_string())])
+            .query(query, encode_params![document_id])
             .map_err(|e| format!("Failed to query document chunks: {:?}", e))?;
 
         use common_lib::decode::DbResultDecoder;
@@ -133,7 +134,6 @@ impl DocumentAgent for DocumentAgentImpl {
 }
 
 impl DocumentAgentImpl {
-
     fn build_document_list_query(
         &self,
         filters: Option<DocumentFilters>,
@@ -156,7 +156,7 @@ impl DocumentAgentImpl {
                     placeholders.join(", ")
                 ));
                 for content_type in &filters.content_types {
-                    params.push(PostgresDbValue::Text(format!("{:?}", content_type)));
+                    params.push(format!("{:?}", content_type).encode());
                     param_index += 1;
                 }
             }
@@ -165,7 +165,7 @@ impl DocumentAgentImpl {
             if !filters.tags.is_empty() {
                 for tag in &filters.tags {
                     query_conditions.push(format!("tags ? ${}", param_index));
-                    params.push(PostgresDbValue::Text(tag.clone()));
+                    params.push(tag.encode());
                     param_index += 1;
                 }
             }
@@ -179,7 +179,7 @@ impl DocumentAgentImpl {
                     .collect();
                 query_conditions.push(format!("source IN ({})", placeholders.join(", ")));
                 for source in &filters.sources {
-                    params.push(PostgresDbValue::Text(source.clone()));
+                    params.push(source.encode());
                     param_index += 1;
                 }
             }
@@ -191,8 +191,8 @@ impl DocumentAgentImpl {
                     param_index,
                     param_index + 1
                 ));
-                params.push(PostgresDbValue::Text(date_range.start.clone()));
-                params.push(PostgresDbValue::Text(date_range.end.clone()));
+                params.push((&date_range.start).encode());
+                params.push((&date_range.end).encode());
                 // param_index += 2; // Not needed since this is the last parameter
             }
         }

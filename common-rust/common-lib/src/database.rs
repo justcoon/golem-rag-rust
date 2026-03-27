@@ -11,16 +11,19 @@ pub use golem_rust::bindings::golem::rdbms::postgres::{
     LazyDbValue as PostgresLazyDbValue,
 };
 
+/// A wrapper for types that should be encoded/decoded from JSON/JSONB
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct Json<T>(pub T);
+
+pub use decode::{DbResultDecoder, DbRowDecoder, DbValueDecoder};
+pub use encode::{DbParamsEncoder, DbValueEncoder};
+
 pub mod decode {
     use super::*;
 
     pub trait DbValueDecoder: Sized {
         fn decode(value: &PostgresDbValue) -> anyhow::Result<Self>;
     }
-
-    /// A wrapper for types that should be decoded from JSON/JSONB
-    #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-    pub struct Json<T>(pub T);
 
     impl<T: serde::de::DeserializeOwned> DbValueDecoder for Json<T> {
         fn decode(value: &PostgresDbValue) -> anyhow::Result<Self> {
@@ -85,8 +88,8 @@ pub mod decode {
         }
     }
 
-    impl<T1: DbValueDecoder, T2: DbValueDecoder, T3: DbValueDecoder, T4: DbValueDecoder> DbRowDecoder
-        for (T1, T2, T3, T4)
+    impl<T1: DbValueDecoder, T2: DbValueDecoder, T3: DbValueDecoder, T4: DbValueDecoder>
+        DbRowDecoder for (T1, T2, T3, T4)
     {
         fn decode_row(row: &PostgresDbRow, _columns: &[PostgresDbColumn]) -> anyhow::Result<Self> {
             let v1 = T1::decode(
@@ -117,9 +120,7 @@ pub mod decode {
     macro_rules! db_value_decoder_json {
         ($t:ty) => {
             impl $crate::database::decode::DbValueDecoder for $t {
-                fn decode(
-                    value: &$crate::database::PostgresDbValue,
-                ) -> anyhow::Result<Self> {
+                fn decode(value: &$crate::database::PostgresDbValue) -> anyhow::Result<Self> {
                     match value {
                         $crate::database::PostgresDbValue::Jsonb(s)
                         | $crate::database::PostgresDbValue::Json(s) => serde_json::from_str(s)
@@ -230,7 +231,10 @@ pub mod decode {
                 PostgresDbValue::Int8(i) => Ok(*i),
                 PostgresDbValue::Int4(i) => Ok(*i as i64),
                 PostgresDbValue::Int2(i) => Ok(*i as i64),
-                _ => Err(anyhow::anyhow!("Expected Int8, Int4 or Int2 (for i64), got {:?}", value)),
+                _ => Err(anyhow::anyhow!(
+                    "Expected Int8, Int4 or Int2 (for i64), got {:?}",
+                    value
+                )),
             }
         }
     }
@@ -240,7 +244,10 @@ pub mod decode {
             match value {
                 PostgresDbValue::Int4(i) => Ok(*i),
                 PostgresDbValue::Int2(i) => Ok(*i as i32),
-                _ => Err(anyhow::anyhow!("Expected Int4 or Int2 (for i32), got {:?}", value)),
+                _ => Err(anyhow::anyhow!(
+                    "Expected Int4 or Int2 (for i32), got {:?}",
+                    value
+                )),
             }
         }
     }
@@ -250,7 +257,10 @@ pub mod decode {
             match value {
                 PostgresDbValue::Int8(i) => Ok(*i as u64),
                 PostgresDbValue::Int4(i) => Ok(*i as u64),
-                _ => Err(anyhow::anyhow!("Expected Int8 or Int4 (for u64), got {:?}", value)),
+                _ => Err(anyhow::anyhow!(
+                    "Expected Int8 or Int4 (for u64), got {:?}",
+                    value
+                )),
             }
         }
     }
@@ -260,7 +270,10 @@ pub mod decode {
             match value {
                 PostgresDbValue::Float4(f) => Ok(*f),
                 PostgresDbValue::Float8(f) => Ok(*f as f32),
-                _ => Err(anyhow::anyhow!("Expected Float4 or Float8 (for f32), got {:?}", value)),
+                _ => Err(anyhow::anyhow!(
+                    "Expected Float4 or Float8 (for f32), got {:?}",
+                    value
+                )),
             }
         }
     }
@@ -270,7 +283,10 @@ pub mod decode {
             match value {
                 PostgresDbValue::Float8(f) => Ok(*f),
                 PostgresDbValue::Float4(f) => Ok(*f as f64),
-                _ => Err(anyhow::anyhow!("Expected Float8 or Float4 (for f64), got {:?}", value)),
+                _ => Err(anyhow::anyhow!(
+                    "Expected Float8 or Float4 (for f64), got {:?}",
+                    value
+                )),
             }
         }
     }
@@ -289,7 +305,10 @@ pub mod decode {
             match value {
                 PostgresDbValue::Oid(o) => Ok(*o),
                 PostgresDbValue::Int4(i) => Ok(*i as u32),
-                _ => Err(anyhow::anyhow!("Expected Oid or Int4 (for u32), got {:?}", value)),
+                _ => Err(anyhow::anyhow!(
+                    "Expected Oid or Int4 (for u32), got {:?}",
+                    value
+                )),
             }
         }
     }
@@ -325,7 +344,261 @@ pub mod decode {
     }
 }
 
+pub mod encode {
+    use super::*;
 
+    pub trait DbValueEncoder {
+        fn encode(self) -> PostgresDbValue;
+    }
+
+    #[macro_export]
+    macro_rules! db_value_encoder_json {
+        ($t:ty) => {
+            impl $crate::database::encode::DbValueEncoder for $t {
+                fn encode(self) -> $crate::database::PostgresDbValue {
+                    $crate::database::PostgresDbValue::Jsonb(
+                        serde_json::to_string(&self).unwrap_or_else(|_| "null".to_string()),
+                    )
+                }
+            }
+
+            impl $crate::database::encode::DbValueEncoder for &$t {
+                fn encode(self) -> $crate::database::PostgresDbValue {
+                    $crate::database::PostgresDbValue::Jsonb(
+                        serde_json::to_string(self).unwrap_or_else(|_| "null".to_string()),
+                    )
+                }
+            }
+        };
+    }
+
+    pub trait DbParamsEncoder {
+        fn encode_params(self) -> Vec<PostgresDbValue>;
+    }
+
+    impl<T: serde::Serialize> DbValueEncoder for Json<T> {
+        fn encode(self) -> PostgresDbValue {
+            PostgresDbValue::Jsonb(
+                serde_json::to_string(&self.0).unwrap_or_else(|_| "null".to_string()),
+            )
+        }
+    }
+
+    impl DbValueEncoder for &String {
+        fn encode(self) -> PostgresDbValue {
+            PostgresDbValue::Text(self.clone())
+        }
+    }
+
+    impl DbValueEncoder for String {
+        fn encode(self) -> PostgresDbValue {
+            PostgresDbValue::Text(self)
+        }
+    }
+
+    impl DbValueEncoder for &str {
+        fn encode(self) -> PostgresDbValue {
+            PostgresDbValue::Text(self.to_string())
+        }
+    }
+
+    impl DbValueEncoder for bool {
+        fn encode(self) -> PostgresDbValue {
+            PostgresDbValue::Boolean(self)
+        }
+    }
+
+    impl DbValueEncoder for &bool {
+        fn encode(self) -> PostgresDbValue {
+            PostgresDbValue::Boolean(*self)
+        }
+    }
+
+    impl DbValueEncoder for i64 {
+        fn encode(self) -> PostgresDbValue {
+            PostgresDbValue::Int8(self)
+        }
+    }
+
+    impl DbValueEncoder for &i64 {
+        fn encode(self) -> PostgresDbValue {
+            PostgresDbValue::Int8(*self)
+        }
+    }
+
+    impl DbValueEncoder for i32 {
+        fn encode(self) -> PostgresDbValue {
+            PostgresDbValue::Int4(self)
+        }
+    }
+
+    impl DbValueEncoder for &i32 {
+        fn encode(self) -> PostgresDbValue {
+            PostgresDbValue::Int4(*self)
+        }
+    }
+
+    impl DbValueEncoder for u64 {
+        fn encode(self) -> PostgresDbValue {
+            PostgresDbValue::Int8(self as i64)
+        }
+    }
+
+    impl DbValueEncoder for &u64 {
+        fn encode(self) -> PostgresDbValue {
+            PostgresDbValue::Int8(*self as i64)
+        }
+    }
+
+    impl DbValueEncoder for f32 {
+        fn encode(self) -> PostgresDbValue {
+            PostgresDbValue::Float4(self)
+        }
+    }
+
+    impl DbValueEncoder for &f32 {
+        fn encode(self) -> PostgresDbValue {
+            PostgresDbValue::Float4(*self)
+        }
+    }
+
+    impl DbValueEncoder for f64 {
+        fn encode(self) -> PostgresDbValue {
+            PostgresDbValue::Float8(self)
+        }
+    }
+
+    impl DbValueEncoder for &f64 {
+        fn encode(self) -> PostgresDbValue {
+            PostgresDbValue::Float8(*self)
+        }
+    }
+
+    impl DbValueEncoder for i16 {
+        fn encode(self) -> PostgresDbValue {
+            PostgresDbValue::Int2(self)
+        }
+    }
+
+    impl DbValueEncoder for &i16 {
+        fn encode(self) -> PostgresDbValue {
+            PostgresDbValue::Int2(*self)
+        }
+    }
+
+    impl DbValueEncoder for u32 {
+        fn encode(self) -> PostgresDbValue {
+            PostgresDbValue::Int4(self as i32)
+        }
+    }
+
+    impl DbValueEncoder for &u32 {
+        fn encode(self) -> PostgresDbValue {
+            PostgresDbValue::Int4(*self as i32)
+        }
+    }
+
+    impl DbValueEncoder for Vec<u8> {
+        fn encode(self) -> PostgresDbValue {
+            PostgresDbValue::Bytea(self)
+        }
+    }
+
+    impl DbValueEncoder for &Vec<u8> {
+        fn encode(self) -> PostgresDbValue {
+            PostgresDbValue::Bytea(self.clone())
+        }
+    }
+
+    impl<T: DbValueEncoder> DbValueEncoder for Option<T> {
+        fn encode(self) -> PostgresDbValue {
+            match self {
+                Some(v) => v.encode(),
+                None => PostgresDbValue::Null,
+            }
+        }
+    }
+
+    impl<T: DbValueEncoder + Clone> DbValueEncoder for &Option<T> {
+        fn encode(self) -> PostgresDbValue {
+            match self {
+                Some(v) => v.clone().encode(),
+                None => PostgresDbValue::Null,
+            }
+        }
+    }
+
+    impl<T: DbValueEncoder> DbValueEncoder for Vec<T> {
+        fn encode(self) -> PostgresDbValue {
+            PostgresDbValue::Array(
+                self.into_iter()
+                    .map(|v| PostgresLazyDbValue::new(v.encode()))
+                    .collect(),
+            )
+        }
+    }
+
+    impl<T: DbValueEncoder + Clone> DbValueEncoder for &Vec<T> {
+        fn encode(self) -> PostgresDbValue {
+            PostgresDbValue::Array(
+                self.iter()
+                    .map(|v| PostgresLazyDbValue::new(v.clone().encode()))
+                    .collect(),
+            )
+        }
+    }
+
+    impl<T: DbValueEncoder + Clone> DbValueEncoder for &[T] {
+        fn encode(self) -> PostgresDbValue {
+            PostgresDbValue::Array(
+                self.iter()
+                    .map(|v| PostgresLazyDbValue::new(v.clone().encode()))
+                    .collect(),
+            )
+        }
+    }
+
+    impl DbValueEncoder for PostgresDbValue {
+        fn encode(self) -> PostgresDbValue {
+            self
+        }
+    }
+
+    impl<T1: DbValueEncoder> DbParamsEncoder for (T1,) {
+        fn encode_params(self) -> Vec<PostgresDbValue> {
+            vec![self.0.encode()]
+        }
+    }
+
+    impl<T1: DbValueEncoder, T2: DbValueEncoder> DbParamsEncoder for (T1, T2) {
+        fn encode_params(self) -> Vec<PostgresDbValue> {
+            vec![self.0.encode(), self.1.encode()]
+        }
+    }
+
+    impl<T1: DbValueEncoder, T2: DbValueEncoder, T3: DbValueEncoder> DbParamsEncoder for (T1, T2, T3) {
+        fn encode_params(self) -> Vec<PostgresDbValue> {
+            vec![self.0.encode(), self.1.encode(), self.2.encode()]
+        }
+    }
+
+    impl DbParamsEncoder for Vec<PostgresDbValue> {
+        fn encode_params(self) -> Vec<PostgresDbValue> {
+            self
+        }
+    }
+}
+
+#[macro_export]
+macro_rules! encode_params {
+    ($($val:expr),* $(,)?) => {
+        vec![
+            $(
+                $crate::database::encode::DbValueEncoder::encode($val),
+            )*
+        ]
+    };
+}
 
 #[derive(Clone, Debug, Schema, Serialize, Deserialize)]
 pub struct PostgresDbConfig {
@@ -414,8 +687,7 @@ impl DatabaseHelper {
         self.transactional(|transaction| {
             for table in tables {
                 let query = format!("DELETE FROM {} WHERE document_id = $1", table);
-                transaction
-                    .execute(&query, vec![PostgresDbValue::Text(document_id.to_string())])?;
+                transaction.execute(&query, encode_params![document_id])?;
             }
             Ok(())
         })
@@ -429,7 +701,7 @@ impl DatabaseHelper {
         log::info!("Deleting document: {}", document_id);
         self.connection.execute(
             "DELETE FROM documents WHERE id = $1",
-            vec![PostgresDbValue::Text(document_id.to_string())],
+            encode_params![document_id],
         )?;
         Ok(())
     }
@@ -440,17 +712,17 @@ impl DatabaseHelper {
         self.connection.execute(
             "INSERT INTO documents (id, title, content, metadata, created_at, updated_at, tags, source, namespace, size_bytes) 
              VALUES ($1, $2, $3, $4, $5::timestamptz, $6::timestamptz, $7, $8, $9, $10)",
-            vec![
-                PostgresDbValue::Text(document_id.clone()),
-                PostgresDbValue::Text(document.title.clone()),
-                PostgresDbValue::Text(document.content.clone()),
-                PostgresDbValue::Jsonb(serde_json::to_string(&document.metadata)?),
-                PostgresDbValue::Text(document.created_at.clone()),
-                PostgresDbValue::Text(document.updated_at.clone()),
-                PostgresDbValue::Array(document.tags.iter().map(|tag| PostgresLazyDbValue::new(PostgresDbValue::Text(tag.clone()))).collect()),
-                PostgresDbValue::Text(document.source.clone()),
-                PostgresDbValue::Text(document.namespace.clone()),
-                PostgresDbValue::Int8(document.size_bytes as i64),
+             encode_params![
+                document_id.clone(),
+                document.title.clone(),
+                document.content.clone(),
+                &document.metadata,
+                document.created_at.clone(),
+                document.updated_at.clone(),
+                &document.tags,
+                document.source.clone(),
+                document.namespace.clone(),
+                document.size_bytes as i64,
             ]
         )?;
 
@@ -459,9 +731,7 @@ impl DatabaseHelper {
 
     pub fn load_document(&self, document_id: &str) -> Result<Option<Document>> {
         let query = "SELECT id, title, content, metadata, source, namespace, tags, size_bytes, created_at::text, updated_at::text FROM documents WHERE id = $1";
-        let result = self
-            .connection
-            .query(query, vec![PostgresDbValue::Text(document_id.to_string())])?;
+        let result = self.connection.query(query, encode_params![document_id])?;
 
         use crate::database::decode::DbResultDecoder;
         let documents = Document::decode_result(result)?;
@@ -470,9 +740,7 @@ impl DatabaseHelper {
 
     pub fn document_exists(&self, document_id: &str) -> Result<bool> {
         let query = "SELECT COUNT(*) FROM documents WHERE id = $1";
-        let result = self
-            .connection
-            .query(query, vec![PostgresDbValue::Text(document_id.to_string())])?;
+        let result = self.connection.query(query, encode_params![document_id])?;
 
         use crate::database::decode::{DbResultDecoder, Single};
         let counts = Single::<i64>::decode_result(result)?;
@@ -488,10 +756,7 @@ impl DatabaseHelper {
 
         self.connection.execute(
             "UPDATE document_embeddings SET embedding_status = $1, updated_at = NOW() WHERE document_id = $2",
-            vec![
-                PostgresDbValue::Text(status_str),
-                PostgresDbValue::Text(document_id.to_string()),
-            ]
+            encode_params![status_str, document_id],
         )?;
 
         Ok(())
@@ -500,9 +765,7 @@ impl DatabaseHelper {
     pub fn get_embedding_status(&self, document_id: &str) -> Result<EmbeddingStatus> {
         let query =
             "SELECT embedding_status FROM document_embeddings WHERE document_id = $1 LIMIT 1";
-        let result = self
-            .connection
-            .query(query, vec![PostgresDbValue::Text(document_id.to_string())])?;
+        let result = self.connection.query(query, encode_params![document_id])?;
 
         use crate::database::decode::{DbResultDecoder, Single};
         let status = Single::<EmbeddingStatus>::decode_result(result)?;
@@ -520,24 +783,18 @@ impl DatabaseHelper {
         chunk_index: i32,
         chunk_text: &str,
     ) -> Result<()> {
-        let vector_params: Vec<PostgresLazyDbValue> = embedding
-            .vector
-            .iter()
-            .map(|&v| PostgresLazyDbValue::new(PostgresDbValue::Float4(v)))
-            .collect();
-
         self.connection.execute(
             "INSERT INTO document_embeddings (id, document_id, chunk_index, chunk_text, embedding, embedding_status, created_at, updated_at) 
              VALUES ($1, $2, $3, $4, $5, $6, $7::timestamptz, $8::timestamptz)",
-            vec![
-                PostgresDbValue::Text(embedding.id.clone()),
-                PostgresDbValue::Text(document_id.to_string()),
-                PostgresDbValue::Int4(chunk_index),
-                PostgresDbValue::Text(chunk_text.to_string()),
-                PostgresDbValue::Array(vector_params),
-                PostgresDbValue::Text(EmbeddingStatus::InProgress.to_string()),
-                PostgresDbValue::Text(embedding.created_at.clone()),
-                PostgresDbValue::Text(embedding.created_at.clone()),
+            encode_params![
+                embedding.id.clone(),
+                document_id,
+                chunk_index,
+                chunk_text,
+                &embedding.vector,
+                EmbeddingStatus::InProgress.to_string(),
+                &embedding.created_at,
+                &embedding.created_at,
             ],
         )?;
 
@@ -545,18 +802,18 @@ impl DatabaseHelper {
     }
 
     pub fn store_document_chunk(&self, chunk: &DocumentChunk) -> Result<()> {
-        self.connection .execute(
+        self.connection.execute(
             "INSERT INTO document_chunks (id, document_id, content, chunk_index, start_pos, end_pos, token_count) 
              VALUES ($1, $2, $3, $4, $5, $6, $7)",
-            vec![
-                PostgresDbValue::Text(chunk.id.clone()),
-                PostgresDbValue::Text(chunk.document_id.clone()),
-                PostgresDbValue::Text(chunk.content.clone()),
-                PostgresDbValue::Int4(chunk.chunk_index as i32),
-                PostgresDbValue::Int4(chunk.start_pos as i32),
-                PostgresDbValue::Int4(chunk.end_pos as i32),
-                PostgresDbValue::Int4(chunk.token_count.unwrap_or(0) as i32),
-            ]
+            encode_params![
+                chunk.id.clone(),
+                chunk.document_id.clone(),
+                chunk.content.clone(),
+                chunk.chunk_index as i32,
+                chunk.start_pos as i32,
+                chunk.end_pos as i32,
+                chunk.token_count.unwrap_or(0) as i32,
+            ],
         )?;
 
         Ok(())

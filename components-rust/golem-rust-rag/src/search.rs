@@ -126,7 +126,6 @@ impl SearchAgent for SearchAgentImpl {
 }
 
 impl SearchAgentImpl {
-
     async fn generate_query_embedding(&self, query: &str) -> AgentResult<Vec<f32>> {
         let embedding_client = EmbeddingClient::from_env().map_err(|e| {
             format!(
@@ -159,11 +158,6 @@ impl SearchAgentImpl {
         threshold: f32,
         filter_conditions: Option<&str>,
     ) -> AgentResult<Vec<SearchResult>> {
-        let embedding_array: Vec<PostgresLazyDbValue> = query_embedding
-            .iter()
-            .map(|&v| PostgresLazyDbValue::new(PostgresDbValue::Float4(v)))
-            .collect();
-
         let filters = filter_conditions.unwrap_or("1=1");
 
         let sql_query = format!(
@@ -193,11 +187,7 @@ impl SearchAgentImpl {
             .connection
             .query(
                 &sql_query,
-                vec![
-                    PostgresDbValue::Int4(limit as i32),
-                    PostgresDbValue::Array(embedding_array),
-                    PostgresDbValue::Float4(threshold),
-                ],
+                encode_params![limit as i32, query_embedding, threshold,],
             )
             .map_err(|e| format!("Failed to execute vector search query: {:?}", e))?;
 
@@ -227,7 +217,7 @@ impl SearchAgentImpl {
 
         let result = db_helper
             .connection
-            .query(query, vec![PostgresDbValue::Text(document_id.to_string())])
+            .query(query, encode_params![document_id])
             .map_err(|e| format!("Failed to get document embedding: {:?}", e))?;
 
         use common_lib::decode::{DbResultDecoder, Single};
@@ -346,13 +336,7 @@ impl SearchAgentImpl {
 
         let result = db_helper
             .connection
-            .query(
-                &sql_query,
-                vec![
-                    PostgresDbValue::Text(query.to_string()),
-                    PostgresDbValue::Int4(limit as i32),
-                ],
-            )
+            .query(&sql_query, encode_params![query, limit as i32,])
             .map_err(|e| format!("Failed to execute keyword search query: {:?}", e))?;
 
         use common_lib::decode::DbResultDecoder;

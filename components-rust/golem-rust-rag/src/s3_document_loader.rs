@@ -199,7 +199,7 @@ impl S3DocumentLoaderAgentImpl {
         let s3_prefix = self
             .namespace_to_s3_prefix(namespace)
             .map_err(|e| format!("Failed to create S3 prefix: {:?}", e))?;
-        
+
         let list_response = self
             .s3_client
             .list_objects(&self.bucket, Some(&s3_prefix))
@@ -284,13 +284,9 @@ impl S3DocumentLoaderAgentImpl {
         db_helper: &DatabaseHelper,
     ) -> anyhow::Result<Option<(String, Option<String>)>> {
         let query = "SELECT id, metadata->'source_metadata'->>'last_modified' FROM documents WHERE metadata->'source_metadata'->>'s3_key' = $1 AND source = 's3' AND namespace = $2";
-        let result = db_helper.connection.query(
-            query,
-            vec![
-                PostgresDbValue::Text(s3_key.to_string()),
-                PostgresDbValue::Text(namespace.to_string()),
-            ],
-        )?;
+        let result = db_helper
+            .connection
+            .query(query, encode_params![s3_key, namespace])?;
 
         use common_lib::decode::DbResultDecoder;
         let results: Vec<(String, Option<String>)> =
