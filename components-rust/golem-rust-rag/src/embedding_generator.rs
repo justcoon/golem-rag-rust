@@ -1,5 +1,7 @@
+use crate::database_helper::DatabaseHelperRagext;
+use crate::models::*;
 use chrono::Utc;
-use common_lib::*;
+use common_lib::{DatabaseHelper, EmbeddingClient, PostgresDbConfig};
 use futures::future;
 use golem_rust::{agent_definition, agent_implementation};
 use std::string::String;

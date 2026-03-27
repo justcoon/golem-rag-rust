@@ -1,10 +1,7 @@
-use crate::database::{
-    decode::DbRowDecoder, decode::DbValueDecoder, PostgresDbColumn, PostgresDbRow, PostgresDbValue,
-};
+use common_lib::{DbRowDecoder, DbValueDecoder, PostgresDbColumn, PostgresDbRow, PostgresDbValue};
 use golem_rust::Schema;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::str::FromStr;
 
 #[derive(Clone, Debug, Schema, Serialize, Deserialize)]
 pub struct Document {
@@ -27,10 +24,10 @@ pub struct DocumentMetadata {
     pub metadata: HashMap<String, String>,
 }
 
-crate::db_value_decoder_json!(DocumentMetadata);
-crate::db_value_encoder_json!(DocumentMetadata);
+common_lib::db_value_decoder_json!(DocumentMetadata);
+common_lib::db_value_encoder_json!(DocumentMetadata);
 
-crate::db_row_decoder!(Document {
+common_lib::db_row_decoder!(Document {
     id,
     title,
     content,
@@ -89,6 +86,7 @@ impl std::str::FromStr for EmbeddingStatus {
 impl DbValueDecoder for EmbeddingStatus {
     fn decode(value: &PostgresDbValue) -> anyhow::Result<Self> {
         let status_str = String::decode(value)?;
+        use std::str::FromStr;
         Self::from_str(&status_str).map_err(|e: String| anyhow::anyhow!(e))
     }
 }
@@ -136,7 +134,7 @@ pub struct DocumentChunk {
     pub token_count: Option<u32>,
 }
 
-crate::db_row_decoder!(DocumentChunk {
+common_lib::db_row_decoder!(DocumentChunk {
     id,
     document_id,
     content,
