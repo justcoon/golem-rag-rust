@@ -77,28 +77,30 @@ httpApi:
 
         # S3 document loading endpoints
         - method: POST
-          path: /s3/load/{namespace}
+          path: /s3/load/{bucket}/{namespace}
           binding:
             type: default
             componentName: golem-rust:rag
             response: |
+              let bucket: string = request.path.bucket;
               let namespace: string = request.path.namespace;
               let agent = s3-document-loader-agent();
-              let result = agent.load-documents-from-namespace(namespace);
+              let result = agent.load-documents(bucket, namespace);
               match result {
                 ok(r) => { status: 200, body: ok(r)  },         
                 err(e) => { status: 400, body: err({ error: e }) }
               }
 #
 #        - method: GET
-#          path: /s3/list/{namespace}
+#          path: /s3/list/{bucket}/{namespace}
 #          binding:
 #            type: default
 #            componentName: golem-rust:rag
 #            response: |
+#              let bucket: string = request.path.bucket;
 #              let namespace: string = request.path.namespace;
 #              let agent = s3-document-loader-agent();
-#              let documents = agent.list-namespace-documents(namespace);
+#              let documents = agent.list-documents(bucket, namespace);
 #              { status: 200, body: { documents: documents } }
 
         # Embedding generation endpoints
@@ -173,7 +175,6 @@ components:
       AWS_ACCESS_KEY_ID: "{{ AWS_ACCESS_KEY_ID }}"
       AWS_SECRET_ACCESS_KEY: "{{ AWS_SECRET_ACCESS_KEY }}"
       AWS_DEFAULT_REGION: "{{ AWS_DEFAULT_REGION }}"
-      AWS_S3_BUCKET: "{{ AWS_S3_BUCKET }}"
       S3_ENDPOINT_URL: "{{ S3_ENDPOINT_URL }}"
       
       # Embedding Configuration

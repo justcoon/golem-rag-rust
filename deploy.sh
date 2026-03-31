@@ -67,7 +67,7 @@ fi
 # Verify critical environment variables
 print_status "Verifying critical environment variables..."
 
-critical_vars=("DB_URL" "AWS_ACCESS_KEY_ID" "AWS_SECRET_ACCESS_KEY" "AWS_S3_BUCKET")
+critical_vars=("DB_URL" "AWS_ACCESS_KEY_ID" "AWS_SECRET_ACCESS_KEY")
 missing_vars=()
 
 for var in "${critical_vars[@]}"; do
@@ -91,7 +91,6 @@ print_success "All critical environment variables are set"
 # Show deployment configuration
 print_status "Deployment configuration:"
 echo "  Database URL: ${DB_URL:0:50}..."
-echo "  S3 Bucket: ${AWS_S3_BUCKET}"
 echo "  S3 Region: ${AWS_DEFAULT_REGION}"
 echo "  Embedding Model: ${EMBEDDING_MODEL}"
 echo "  Log Level: ${RUST_LOG:-info}"

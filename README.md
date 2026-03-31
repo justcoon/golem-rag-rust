@@ -7,7 +7,7 @@ A comprehensive Retrieval-Augmented Generation (RAG) system built on Golem Cloud
 - **Hybrid Search**: Combines semantic (vector embeddings) and keyword (full-text) search using Reciprocal Rank Fusion (RRF)
 - **Document Management**: Store, retrieve, and manage documents with metadata
 - **Embedding Generation**: Automatic vector embeddings for documents with multiple provider support
-- **S3 Integration**: Load documents directly from S3 buckets with namespace organization
+- **S3 Integration**: Load documents from multiple S3 buckets with namespace organization
 - **RESTful API**: HTTP endpoints for all operations
 - **PostgreSQL Backend**: Persistent storage with vector search capabilities (pgvector)
 
@@ -55,10 +55,10 @@ Individual document embedding processor:
 S3 integration for document loading:
 
 **Methods:**
-- `load_documents_from_namespace(namespace)` - Load documents from S3 namespace
-- `list_namespace_documents(namespace)` - List available documents in namespace
+- `load_documents(bucket, namespace)` - Load documents from S3 bucket and namespace
+- `list_documents(bucket, namespace)` - List available documents in bucket and namespace
 
-**Note**: Uses the `NAMESPACE` parameter to look for files under the `{namespace}/` prefix in the S3 bucket.
+**Note**: Uses `bucket` and `namespace` parameters to look for files under the `{namespace}/` prefix in the specified S3 bucket. Supports multiple buckets for different document types or departments.
 
 ## Architecture
 
@@ -95,20 +95,21 @@ The system consists of 5 core agents running on Golem Cloud, coordinated through
 - Embedding status tracking and management
 
 **S3DocumentLoaderAgent**
-- Document loading from S3 namespaces
+- Document loading from multiple S3 buckets and namespaces
 - Content type detection (md, txt, pdf, html, json)
 - Automatic metadata generation and document ID creation
+- Bucket-specific document management
 
 ### Data Flow
 
-1. **Document Ingestion**: S3 → S3DocumentLoaderAgent → PostgreSQL
+1. **Document Ingestion**: S3 (multiple buckets) → S3DocumentLoaderAgent → PostgreSQL
 2. **Embedding Generation**: EmbeddingGeneratorAgent → DocumentEmbeddingGeneratorAgent → Ollama → PostgreSQL
 3. **Search Operations**: API Gateway → SearchAgent → PostgreSQL (vector + full-text) → Results
 
 ### External Services
 
 - **PostgreSQL + pgvector**: Persistent storage for documents, chunks, and vector embeddings
-- **RustFS S3 Storage**: S3-compatible document storage with namespace organization
+- **RustFS S3 Storage**: S3-compatible document storage with multi-bucket support and namespace organization
 - **Ollama**: Local embedding generation service with configurable models
 
 ## Quick Start
@@ -119,7 +120,7 @@ The system consists of 5 core agents running on Golem Cloud, coordinated through
 - `cargo-component` version 0.21.1: `cargo install --force cargo-component@0.21.1`
 - Golem CLI (`golem`) v1.4.2: download from https://github.com/golemcloud/golem/releases
 - Docker and Docker Compose
-- S3 bucket (optional, for document loading)
+- S3 buckets (optional, for document loading)
 
 ### Environment Setup
 
@@ -135,9 +136,9 @@ docker-compose up -d
 
 # This includes:
 # - PostgreSQL with pgvector extension and automatic migrations
-# - RustFS S3-compatible storage for document loading
+# - RustFS S3-compatible storage with multi-bucket support
 # - Ollama for local embedding generation
-# - Automatic setup of buckets and embedding models
+# - Automatic setup of multiple buckets and embedding models
 ```
 
 ### Loading Documents
@@ -148,27 +149,35 @@ Load documents from local files directly to the PostgreSQL database:
 ./load_to_postgres.sh data/
 ```
 
-#### 2. Via S3 (RustFS)
-Load documents from an S3-compatible storage like RustFS using namespaces:
+#### 2. Via S3 (RustFS) - Multi-Bucket Support
+Load documents from S3-compatible storage using multiple buckets and namespaces:
 
-**Step A: Upload documents to S3**
+**Step A: Upload documents to specific bucket**
 ```bash
-# Usage: ./upload_to_s3.sh [data_directory] [namespace]
-./upload_to_s3.sh data/ samp
+# Usage: ./upload_to_s3.sh [bucket] [data_directory] [namespace]
+./upload_to_s3.sh golem-documents data general
 ```
 
-**Step B: Trigger document loading in the agent**
+**Step B: List files in bucket**
+```bash
+# Usage: ./list_s3_files.sh [bucket]
+./list_s3_files.sh golem-documents
+```
+
+**Step C: Trigger document loading in the agent**
 ```bash
 golem agent invoke 's3-document-loader-agent()' \
-  'golem-rust:rag/s3-document-loader-agent.{load-documents-from-namespace}' \
-  '"samp"'
+  'golem-rust:rag/s3-document-loader-agent.{load-documents}' \
+  '"golem-documents" "general"'
 ```
 
 **Features:**
+- **Multi-bucket support**: Organize documents across different buckets (legal, technical, general, etc.)
 - Automatic content type detection (md, txt, pdf, html, json)
 - Document ID generation using MD5 hash
 - Metadata creation with timestamps
-- Support for S3 namespaces (prefixes)
+- Support for S3 namespaces (prefixes) within each bucket
+- Bucket-specific document management and isolation
 - Robust XML parsing for S3 metadata extraction
 
 ### Building and Running
@@ -256,6 +265,17 @@ POST /embeddings/generate/{document_id}
 
 # Check embedding status
 GET /embeddings/status/{document_id}
+```
+
+### S3 Document Management
+
+```bash
+# Load documents from S3 bucket and namespace
+POST /s3/load/{bucket}/{namespace}
+# No body required - bucket and namespace are from path
+
+# Example: Load from golem-documents bucket with general namespace
+POST /s3/load/golem-documents/general
 ```
 
 ## Hybrid Search Configuration
