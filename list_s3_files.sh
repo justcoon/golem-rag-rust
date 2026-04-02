@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # List files in RustFS S3 storage
-# Usage: ./list_s3_files.sh
+# Usage: ./list_s3_files.sh [bucket]
 
 # Load environment variables from .env file
 if [ -f .env ]; then
@@ -13,7 +13,7 @@ fi
 # Configuration (will be overridden by .env if available)
 S3_PORT="${S3_PORT:-9000}"
 S3_ENDPOINT="http://localhost:$S3_PORT"
-S3_BUCKET="${AWS_S3_BUCKET:-golem-documents}"
+S3_BUCKET="${1:-${AWS_S3_BUCKET:-golem-documents}}"
 S3_ACCESS_KEY="${AWS_ACCESS_KEY_ID:-rustfsadmin}"
 S3_SECRET_KEY="${AWS_SECRET_ACCESS_KEY:-rustfsadmin123}"
 S3_REGION="${AWS_DEFAULT_REGION:-us-east-1}"

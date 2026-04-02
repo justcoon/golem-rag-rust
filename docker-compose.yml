@@ -29,7 +29,7 @@ services:
       RUSTFS_ACCESS_KEY: ${AWS_ACCESS_KEY_ID}
       RUSTFS_SECRET_KEY: ${AWS_SECRET_ACCESS_KEY}
       RUSTFS_REGION: ${AWS_DEFAULT_REGION}
-      RUSTFS_BUCKET: ${AWS_S3_BUCKET}
+      RUSTFS_BUCKET: golem-documents
       RUSTFS_ADDR: ${RUSTFS_ADDR}
       RUSTFS_LOG_LEVEL: ${RUSTFS_LOG_LEVEL}
       # Standard AWS variables for compatibility
@@ -77,14 +77,10 @@ services:
       - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
       - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
       - AWS_DEFAULT_REGION=${AWS_DEFAULT_REGION}
-      - AWS_S3_BUCKET=${AWS_S3_BUCKET}
+      - AWS_S3_BUCKETS=${AWS_S3_BUCKETS}
     networks:
       - golem-rag-network
-    entrypoint: >
-      /bin/sh -c "
-      aws --endpoint-url http://rustfs:9000 s3 mb s3://$${AWS_S3_BUCKET} || echo 'Bucket might already exist';
-      echo 'RustFS bucket setup complete'
-      "
+    entrypoint: ["/bin/sh", "-c", "for bucket in $(echo ${AWS_S3_BUCKETS} | tr ',' ' '); do aws --endpoint-url http://rustfs:9000 s3 mb s3://$$bucket || echo 'Bucket $$bucket might already exist'; done; echo 'RustFS bucket setup complete'"]
 
   # Ollama setup for embedding model
   ollama-setup:

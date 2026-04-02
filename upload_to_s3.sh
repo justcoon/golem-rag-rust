@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Upload script for RustFS S3-compatible storage
-# Usage: ./upload_to_s3.sh [data_directory] [namespace]
+# Usage: ./upload_to_s3.sh [bucket] [data_directory] [namespace]
 
 # Load environment variables from .env file
 if [ -f .env ]; then
@@ -13,14 +13,14 @@ fi
 # Configuration (will be overridden by .env if available)
 S3_PORT="${S3_PORT:-9000}"
 S3_ENDPOINT="http://localhost:$S3_PORT"
-S3_BUCKET="${AWS_S3_BUCKET:-golem-documents}"
+S3_BUCKET="${1:-${AWS_S3_BUCKET:-golem-documents}}"
 S3_ACCESS_KEY="${AWS_ACCESS_KEY_ID:-rustfsadmin}"
 S3_SECRET_KEY="${AWS_SECRET_ACCESS_KEY:-rustfsadmin123}"
 S3_REGION="${AWS_DEFAULT_REGION:-us-east-1}"
 
 # Data directory (default: data or from .env)
-DATA_DIR="${1:-${DATA_DIR:-data}}"
-NAMESPACE="${2}"
+DATA_DIR="${2:-${DATA_DIR:-data}}"
+NAMESPACE="${3}"
 
 echo "Uploading files to RustFS S3 storage..."
 echo "Endpoint: $S3_ENDPOINT"

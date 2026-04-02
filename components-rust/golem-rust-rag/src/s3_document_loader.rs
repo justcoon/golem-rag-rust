@@ -12,22 +12,30 @@ pub type AgentResult<T> = std::result::Result<T, String>;
 pub trait S3DocumentLoaderAgent {
     fn new() -> Self;
 
-    /// Load documents from S3 using namespace mapping
+    /// Load documents from S3 using namespace and bucket mapping
     ///
     /// # Arguments
+    /// * `bucket` - S3 bucket name
     /// * `namespace` - Logical namespace (e.g., "legal", "technical/reports")
     ///
     /// # Returns
     /// List of document IDs that were successfully loaded
-    fn load_documents_from_namespace(&mut self, namespace: String) -> AgentResult<Vec<String>>;
+    fn load_documents(
+        &mut self,
+        bucket: String,
+        namespace: String,
+    ) -> AgentResult<Vec<String>>;
 
-    /// List available S3 documents for a namespace
-    fn list_namespace_documents(&self, namespace: String) -> AgentResult<Vec<S3DocumentSource>>;
+    /// List available S3 documents for a bucket and namespace
+    fn list_documents(
+        &self,
+        bucket: String,
+        namespace: String,
+    ) -> AgentResult<Vec<S3DocumentSource>>;
 }
 
 struct S3DocumentLoaderAgentImpl {
     s3_client: S3Client,
-    bucket: String,
 }
 
 #[agent_implementation]
@@ -35,18 +43,24 @@ impl S3DocumentLoaderAgent for S3DocumentLoaderAgentImpl {
     fn new() -> Self {
         let s3_client =
             S3Client::from_env().expect("Failed to initialize S3 client from environment");
-        let bucket =
-            std::env::var("AWS_S3_BUCKET").expect("AWS_S3_BUCKET environment variable must be set");
 
-        Self { s3_client, bucket }
+        Self { s3_client }
     }
 
-    fn load_documents_from_namespace(&mut self, namespace: String) -> AgentResult<Vec<String>> {
-        log::info!("Loading documents from namespace: {}", namespace);
+    fn load_documents(
+        &mut self,
+        bucket: String,
+        namespace: String,
+    ) -> AgentResult<Vec<String>> {
+        log::info!(
+            "Loading documents from bucket: {}, namespace: {}",
+            bucket,
+            namespace
+        );
 
         // Step 1: List documents in S3 using namespace directly
         let s3_documents = self
-            .list_s3_documents(&namespace)
+            .list_s3_documents(&bucket, &namespace)
             .map_err(|e| format!("Failed to list S3 documents: {:?}", e))?;
 
         // Step 2: Process each document
@@ -56,7 +70,7 @@ impl S3DocumentLoaderAgent for S3DocumentLoaderAgentImpl {
 
         for s3_doc in &s3_documents {
             // Check if document already exists and if it needs update
-            match self.get_document_info_by_s3_key(&s3_doc.key, &namespace, &db_helper) {
+            match self.get_document_info_by_s3_key(&bucket, &s3_doc.key, &namespace, &db_helper) {
                 Ok(Some((id, db_last_modified))) => {
                     let needs_update = match db_last_modified {
                         Some(ref db_timestamp) => {
@@ -73,8 +87,9 @@ impl S3DocumentLoaderAgent for S3DocumentLoaderAgentImpl {
                         }
                         None => {
                             log::info!(
-                                "Document {} has no stored timestamp, treating as new",
-                                s3_doc.key
+                                "Document {} in bucket {} has no stored timestamp, treating as new",
+                                s3_doc.key,
+                                bucket
                             );
                             true
                         }
@@ -82,8 +97,9 @@ impl S3DocumentLoaderAgent for S3DocumentLoaderAgentImpl {
 
                     if needs_update {
                         log::info!(
-                            "Document {} has changed (S3: {}, DB: {}). Updating...",
+                            "Document {} in bucket {} has changed (S3: {}, DB: {}). Updating...",
                             s3_doc.key,
+                            bucket,
                             s3_doc.last_modified,
                             db_last_modified.unwrap_or("None".to_string())
                         );
@@ -92,24 +108,42 @@ impl S3DocumentLoaderAgent for S3DocumentLoaderAgentImpl {
                             continue;
                         }
                     } else {
-                        log::info!("Document {} is up to date, skipping", s3_doc.key);
+                        log::info!(
+                            "Document {} in bucket {} is up to date, skipping",
+                            s3_doc.key,
+                            bucket
+                        );
                         continue;
                     }
                 }
                 Ok(None) => {
-                    log::info!("Document {} is new, loading...", s3_doc.key);
+                    log::info!(
+                        "Document {} in bucket {} is new, loading...",
+                        s3_doc.key,
+                        bucket
+                    );
                 }
                 Err(e) => {
-                    log::error!("Error checking document status for {}: {:?}", s3_doc.key, e);
+                    log::error!(
+                        "Error checking document status for {} in bucket {}: {:?}",
+                        s3_doc.key,
+                        bucket,
+                        e
+                    );
                     continue;
                 }
             }
 
             // Download document content
-            let content = match self.s3_client.get_object(&self.bucket, &s3_doc.key) {
+            let content = match self.s3_client.get_object(&bucket, &s3_doc.key) {
                 Ok(content) => content,
                 Err(e) => {
-                    log::error!("Failed to download document {}: {:?}", s3_doc.key, e);
+                    log::error!(
+                        "Failed to download document {} from bucket {}: {:?}",
+                        s3_doc.key,
+                        bucket,
+                        e
+                    );
                     continue;
                 }
             };
@@ -144,7 +178,7 @@ impl S3DocumentLoaderAgent for S3DocumentLoaderAgentImpl {
                     source_metadata: {
                         let mut metadata = std::collections::HashMap::new();
                         metadata.insert("s3_key".to_string(), s3_doc.key.clone());
-                        metadata.insert("s3_bucket".to_string(), self.bucket.clone());
+                        metadata.insert("s3_bucket".to_string(), bucket.clone());
                         metadata.insert("last_modified".to_string(), s3_doc.last_modified.clone());
                         metadata
                     },
@@ -158,9 +192,10 @@ impl S3DocumentLoaderAgent for S3DocumentLoaderAgentImpl {
                     let doc_id = document_id.clone();
                     loaded_document_ids.push(document_id);
                     log::info!(
-                        "Loaded document: {} (ID: {}) from namespace: {}",
+                        "Loaded document: {} (ID: {}) from bucket: {}, namespace: {}",
                         s3_doc.key,
                         doc_id,
+                        bucket,
                         namespace
                     );
                 }
@@ -171,15 +206,20 @@ impl S3DocumentLoaderAgent for S3DocumentLoaderAgentImpl {
         }
 
         log::info!(
-            "Successfully loaded {} documents from namespace: {}",
+            "Successfully loaded {} documents from bucket: {}, namespace: {}",
             loaded_document_ids.len(),
+            bucket,
             namespace
         );
         Ok(loaded_document_ids)
     }
 
-    fn list_namespace_documents(&self, namespace: String) -> AgentResult<Vec<S3DocumentSource>> {
-        self.list_s3_documents(&namespace)
+    fn list_documents(
+        &self,
+        bucket: String,
+        namespace: String,
+    ) -> AgentResult<Vec<S3DocumentSource>> {
+        self.list_s3_documents(&bucket, &namespace)
     }
 }
 
@@ -196,14 +236,18 @@ impl S3DocumentLoaderAgentImpl {
         Ok(s3_prefix)
     }
 
-    fn list_s3_documents(&self, namespace: &str) -> AgentResult<Vec<S3DocumentSource>> {
+    fn list_s3_documents(
+        &self,
+        bucket: &str,
+        namespace: &str,
+    ) -> AgentResult<Vec<S3DocumentSource>> {
         let s3_prefix = self
             .namespace_to_s3_prefix(namespace)
             .map_err(|e| format!("Failed to create S3 prefix: {:?}", e))?;
 
         let list_response = self
             .s3_client
-            .list_objects(&self.bucket, Some(&s3_prefix))
+            .list_objects(bucket, Some(&s3_prefix))
             .map_err(|e| format!("Failed to list S3 objects: {:?}", e))?;
         let mut documents = Vec::new();
 
@@ -218,7 +262,7 @@ impl S3DocumentLoaderAgentImpl {
                 size_bytes: obj.size_bytes,
                 last_modified: obj.last_modified,
                 content_type: obj.content_type,
-                bucket: self.bucket.clone(),
+                bucket: bucket.to_string(),
                 namespace: namespace.to_string(),
             };
 
@@ -280,14 +324,15 @@ impl S3DocumentLoaderAgentImpl {
 
     fn get_document_info_by_s3_key(
         &self,
+        bucket: &str,
         s3_key: &str,
         namespace: &str,
         db_helper: &DatabaseHelper,
     ) -> anyhow::Result<Option<(String, Option<String>)>> {
-        let query = "SELECT id, metadata->'source_metadata'->>'last_modified' FROM documents WHERE metadata->'source_metadata'->>'s3_key' = $1 AND source = 's3' AND namespace = $2";
+        let query = "SELECT id, metadata->'source_metadata'->>'last_modified' FROM documents WHERE metadata->'source_metadata'->>'s3_bucket' = $1 AND metadata->'source_metadata'->>'s3_key' = $2 AND source = 's3' AND namespace = $3";
         let result = db_helper
             .connection
-            .query(query, encode_params![s3_key, namespace])?;
+            .query(query, encode_params![bucket, s3_key, namespace])?;
 
         use common_lib::decode::DbResultDecoder;
         let results: Vec<(String, Option<String>)> =
