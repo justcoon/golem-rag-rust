@@ -44,6 +44,17 @@ pub struct S3ListResponse {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct S3BucketInfo {
+    pub name: String,
+    pub creation_date: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct S3ListBucketsResponse {
+    pub buckets: Vec<S3BucketInfo>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct S3ObjectMetadata {
     pub size_bytes: u64,
     pub last_modified: String,
@@ -111,6 +122,49 @@ impl S3Client {
         Self::new(config)
     }
 
+    pub fn list_buckets(&self) -> S3Result<S3ListBucketsResponse> {
+        let endpoint = self.endpoint_url.trim_end_matches('/');
+        let path = "/";
+
+        let timestamp = Utc::now().format("%Y%m%dT%H%M%SZ").to_string();
+        let payload_hash = sha256_hex("".as_bytes());
+
+        let (host, canonical_path) = self.get_host_for_service_endpoint();
+
+        let authorization = self.create_s3_auth_header(
+            "GET",
+            &host,
+            &canonical_path,
+            "",
+            &timestamp,
+            &payload_hash,
+        );
+
+        let url = format!("{}{}", endpoint, path);
+
+        let response = self
+            .client
+            .request(Method::GET, &url)
+            .header("Authorization", authorization)
+            .header("X-Amz-Date", timestamp)
+            .header("X-Amz-Content-Sha256", payload_hash)
+            .send()
+            .map_err(|e| S3Error::NetworkError(format!("Failed to send request: {:?}", e)))?;
+
+        if response.status().is_success() {
+            let body = response
+                .text()
+                .map_err(|e| S3Error::NetworkError(format!("Failed to read response: {:?}", e)))?;
+
+            self.parse_s3_list_buckets_response(&body)
+        } else {
+            Err(S3Error::NetworkError(format!(
+                "S3 request failed with status: {}",
+                response.status()
+            )))
+        }
+    }
+
     fn build_endpoint_url(&self, bucket: &str) -> String {
         let base = self.endpoint_url.trim_end_matches('/');
         if base.contains("localhost") || !base.contains("amazonaws.com") {
@@ -132,6 +186,19 @@ impl S3Client {
             // Virtual-host style: host includes bucket, path is just the resource path
             let host = format!("{}.s3.{}.amazonaws.com", bucket, self.config.region);
             (host, path.to_string())
+        }
+    }
+
+    fn get_host_for_service_endpoint(&self) -> (String, String) {
+        let base = self.endpoint_url.trim_end_matches('/');
+        if base.contains("localhost") || !base.contains("amazonaws.com") {
+            // Path-style: host is the endpoint, path is just the resource path
+            let host = base.replace("https://", "").replace("http://", "");
+            (host, "/".to_string())
+        } else {
+            // For AWS S3 service endpoint, use the regional service endpoint
+            let host = format!("s3.{}.amazonaws.com", self.config.region);
+            (host, "/".to_string())
         }
     }
 
@@ -411,13 +478,15 @@ impl S3Client {
                 .unwrap_or_default();
 
             if !key.is_empty() {
+                let namespace = self.extract_namespace_from_key(&key);
+
                 objects.push(S3DocumentSource {
                     bucket: String::new(), // Will be set by caller
                     key,
                     size_bytes: size,
                     last_modified,
                     content_type: String::new(),
-                    namespace: String::new(), // Will be set by caller
+                    namespace,
                 });
             }
         }
@@ -426,6 +495,31 @@ impl S3Client {
             objects,
             next_token,
         })
+    }
+
+    fn parse_s3_list_buckets_response(&self, body: &str) -> S3Result<S3ListBucketsResponse> {
+        let mut buckets = Vec::new();
+
+        // Split body into <Bucket> blocks
+        let blocks: Vec<&str> = body.split("<Bucket>").collect();
+        for block in blocks.iter().skip(1) {
+            let content_end = block.find("</Bucket>").unwrap_or(block.len());
+            let content = &block[..content_end];
+
+            let name = self.extract_xml_tag(content, "Name").unwrap_or_default();
+            let creation_date = self
+                .extract_xml_tag(content, "CreationDate")
+                .unwrap_or_default();
+
+            if !name.is_empty() {
+                buckets.push(S3BucketInfo {
+                    name,
+                    creation_date,
+                });
+            }
+        }
+
+        Ok(S3ListBucketsResponse { buckets })
     }
 
     fn extract_xml_tag(&self, xml: &str, tag: &str) -> Option<String> {
@@ -439,6 +533,17 @@ impl S3Client {
             }
         }
         None
+    }
+
+    fn extract_namespace_from_key(&self, key: &str) -> String {
+        // Extract the full directory path (excluding the filename) as namespace
+        // For example: "legal/contracts/agreement.pdf" -> "legal/contracts"
+        // For files at root level: "file.txt" -> ""
+        if let Some(last_slash_pos) = key.rfind('/') {
+            key[..last_slash_pos].to_string()
+        } else {
+            String::new() // No directory structure, file is at root
+        }
     }
 }
 

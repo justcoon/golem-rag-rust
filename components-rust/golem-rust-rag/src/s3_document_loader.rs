@@ -20,11 +20,7 @@ pub trait S3DocumentLoaderAgent {
     ///
     /// # Returns
     /// List of document IDs that were successfully loaded
-    fn load_documents(
-        &mut self,
-        bucket: String,
-        namespace: String,
-    ) -> AgentResult<Vec<String>>;
+    fn load_documents(&mut self, bucket: String, namespace: String) -> AgentResult<Vec<String>>;
 
     /// List available S3 documents for a bucket and namespace
     fn list_documents(
@@ -32,6 +28,9 @@ pub trait S3DocumentLoaderAgent {
         bucket: String,
         namespace: String,
     ) -> AgentResult<Vec<S3DocumentSource>>;
+
+    /// List all available S3 buckets
+    fn list_buckets(&self) -> AgentResult<Vec<String>>;
 }
 
 struct S3DocumentLoaderAgentImpl {
@@ -47,11 +46,7 @@ impl S3DocumentLoaderAgent for S3DocumentLoaderAgentImpl {
         Self { s3_client }
     }
 
-    fn load_documents(
-        &mut self,
-        bucket: String,
-        namespace: String,
-    ) -> AgentResult<Vec<String>> {
+    fn load_documents(&mut self, bucket: String, namespace: String) -> AgentResult<Vec<String>> {
         log::info!(
             "Loading documents from bucket: {}, namespace: {}",
             bucket,
@@ -220,6 +215,21 @@ impl S3DocumentLoaderAgent for S3DocumentLoaderAgentImpl {
         namespace: String,
     ) -> AgentResult<Vec<S3DocumentSource>> {
         self.list_s3_documents(&bucket, &namespace)
+    }
+
+    fn list_buckets(&self) -> AgentResult<Vec<String>> {
+        let buckets_response = self
+            .s3_client
+            .list_buckets()
+            .map_err(|e| format!("Failed to list S3 buckets: {:?}", e))?;
+
+        let bucket_names: Vec<String> = buckets_response
+            .buckets
+            .into_iter()
+            .map(|bucket| bucket.name)
+            .collect();
+
+        Ok(bucket_names)
     }
 }
 
