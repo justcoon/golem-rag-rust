@@ -12,21 +12,25 @@ pub type AgentResult<T> = std::result::Result<T, String>;
 pub trait S3DocumentLoaderAgent {
     fn new() -> Self;
 
-    /// Load documents from S3 using namespace and bucket mapping
+    /// Load documents from S3 using bucket and optional prefix
     ///
     /// # Arguments
     /// * `bucket` - S3 bucket name
-    /// * `namespace` - Logical namespace (e.g., "legal", "technical/reports")
+    /// * `prefix` - Optional S3 key prefix to filter documents
     ///
     /// # Returns
     /// List of document IDs that were successfully loaded
-    fn load_documents(&mut self, bucket: String, namespace: String) -> AgentResult<Vec<String>>;
+    fn load_documents(
+        &mut self,
+        bucket: String,
+        prefix: Option<String>,
+    ) -> AgentResult<Vec<String>>;
 
-    /// List available S3 documents for a bucket and namespace
+    /// List available S3 documents for a bucket with optional prefix
     fn list_documents(
         &self,
         bucket: String,
-        namespace: String,
+        prefix: Option<String>,
     ) -> AgentResult<Vec<S3DocumentSource>>;
 
     /// List all available S3 buckets
@@ -46,16 +50,20 @@ impl S3DocumentLoaderAgent for S3DocumentLoaderAgentImpl {
         Self { s3_client }
     }
 
-    fn load_documents(&mut self, bucket: String, namespace: String) -> AgentResult<Vec<String>> {
+    fn load_documents(
+        &mut self,
+        bucket: String,
+        prefix: Option<String>,
+    ) -> AgentResult<Vec<String>> {
         log::info!(
-            "Loading documents from bucket: {}, namespace: {}",
+            "Loading documents from bucket: {}, prefix: {:?}",
             bucket,
-            namespace
+            prefix
         );
 
-        // Step 1: List documents in S3 using namespace directly
+        // Step 1: List documents in S3 using prefix directly
         let s3_documents = self
-            .list_s3_documents(&bucket, &namespace)
+            .list_s3_documents(&bucket, prefix.as_deref())
             .map_err(|e| format!("Failed to list S3 documents: {:?}", e))?;
 
         // Step 2: Process each document
@@ -65,7 +73,12 @@ impl S3DocumentLoaderAgent for S3DocumentLoaderAgentImpl {
 
         for s3_doc in &s3_documents {
             // Check if document already exists and if it needs update
-            match self.get_document_info_by_s3_key(&bucket, &s3_doc.key, &namespace, &db_helper) {
+            match self.get_document_info_by_s3_key(
+                &bucket,
+                &s3_doc.key,
+                &s3_doc.namespace,
+                &db_helper,
+            ) {
                 Ok(Some((id, db_last_modified))) => {
                     let needs_update = match db_last_modified {
                         Some(ref db_timestamp) => {
@@ -163,7 +176,7 @@ impl S3DocumentLoaderAgent for S3DocumentLoaderAgentImpl {
                     }
                 },
                 source: "s3".to_string(),
-                namespace: namespace.clone(),
+                namespace: s3_doc.namespace.clone(),
                 tags: vec!["s3".to_string(), "auto-loaded".to_string()],
                 size_bytes: s3_doc.size_bytes,
                 created_at: s3_doc.last_modified.clone(),
@@ -191,7 +204,7 @@ impl S3DocumentLoaderAgent for S3DocumentLoaderAgentImpl {
                         s3_doc.key,
                         doc_id,
                         bucket,
-                        namespace
+                        s3_doc.namespace
                     );
                 }
                 Err(e) => {
@@ -201,10 +214,10 @@ impl S3DocumentLoaderAgent for S3DocumentLoaderAgentImpl {
         }
 
         log::info!(
-            "Successfully loaded {} documents from bucket: {}, namespace: {}",
+            "Successfully loaded {} documents from bucket: {}, prefix: {:?}",
             loaded_document_ids.len(),
             bucket,
-            namespace
+            prefix
         );
         Ok(loaded_document_ids)
     }
@@ -212,9 +225,9 @@ impl S3DocumentLoaderAgent for S3DocumentLoaderAgentImpl {
     fn list_documents(
         &self,
         bucket: String,
-        namespace: String,
+        prefix: Option<String>,
     ) -> AgentResult<Vec<S3DocumentSource>> {
-        self.list_s3_documents(&bucket, &namespace)
+        self.list_s3_documents(&bucket, prefix.as_deref())
     }
 
     fn list_buckets(&self) -> AgentResult<Vec<String>> {
@@ -234,50 +247,22 @@ impl S3DocumentLoaderAgent for S3DocumentLoaderAgentImpl {
 }
 
 impl S3DocumentLoaderAgentImpl {
-    fn namespace_to_s3_prefix(&self, namespace: &str) -> AgentResult<String> {
-        // Simple convention: namespace -> {namespace}/
-        // e.g., "samp" -> "samp/"
-        let trimmed_namespace = namespace.trim_start_matches('/');
-        let s3_prefix = if trimmed_namespace.is_empty() {
-            "".to_string()
-        } else {
-            format!("{}/", trimmed_namespace)
-        };
-        Ok(s3_prefix)
-    }
-
     fn list_s3_documents(
         &self,
         bucket: &str,
-        namespace: &str,
+        prefix: Option<&str>,
     ) -> AgentResult<Vec<S3DocumentSource>> {
-        let s3_prefix = self
-            .namespace_to_s3_prefix(namespace)
-            .map_err(|e| format!("Failed to create S3 prefix: {:?}", e))?;
-
         let list_response = self
             .s3_client
-            .list_objects(bucket, Some(&s3_prefix))
+            .list_objects(bucket, prefix) // Pass prefix directly
             .map_err(|e| format!("Failed to list S3 objects: {:?}", e))?;
-        let mut documents = Vec::new();
 
-        for obj in list_response.objects {
-            // Skip directories and empty objects
-            if obj.size_bytes == 0 {
-                continue;
-            }
-
-            let document = S3DocumentSource {
-                key: obj.key.clone(),
-                size_bytes: obj.size_bytes,
-                last_modified: obj.last_modified,
-                content_type: obj.content_type,
-                bucket: bucket.to_string(),
-                namespace: namespace.to_string(),
-            };
-
-            documents.push(document);
-        }
+        // Filter out directories and empty objects, bucket is already set by S3 client
+        let documents: Vec<S3DocumentSource> = list_response
+            .objects
+            .into_iter()
+            .filter(|obj| obj.size_bytes > 0) // Skip directories and empty objects
+            .collect();
 
         Ok(documents)
     }

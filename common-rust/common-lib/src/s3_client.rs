@@ -264,7 +264,7 @@ impl S3Client {
                 .text()
                 .map_err(|e| S3Error::NetworkError(format!("Failed to read response: {:?}", e)))?;
 
-            self.parse_s3_list_response(&body)
+            self.parse_s3_list_response(&body, bucket)
         } else {
             Err(S3Error::NetworkError(format!(
                 "S3 request failed with status: {}",
@@ -451,7 +451,7 @@ impl S3Client {
             .collect()
     }
 
-    fn parse_s3_list_response(&self, body: &str) -> S3Result<S3ListResponse> {
+    fn parse_s3_list_response(&self, body: &str, bucket: &str) -> S3Result<S3ListResponse> {
         let mut objects = Vec::new();
         let mut next_token = None;
 
@@ -481,7 +481,7 @@ impl S3Client {
                 let namespace = self.extract_namespace_from_key(&key);
 
                 objects.push(S3DocumentSource {
-                    bucket: String::new(), // Will be set by caller
+                    bucket: bucket.to_string(), // Set bucket here
                     key,
                     size_bytes: size,
                     last_modified,
