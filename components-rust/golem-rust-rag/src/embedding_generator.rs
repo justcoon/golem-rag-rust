@@ -1,7 +1,7 @@
 use crate::database_helper::DatabaseHelperRagext;
 use crate::models::*;
 use chrono::Utc;
-use common_lib::{DatabaseHelper, EmbeddingClient, PostgresDbConfig};
+use common_lib::{DatabaseHelper, EmbeddingClient};
 use futures::future;
 use golem_rust::{agent_definition, agent_implementation};
 use std::string::String;
@@ -29,6 +29,12 @@ pub trait EmbeddingGeneratorAgent {
     /// # Returns
     /// Tuple of (document_ids_processed, total_embeddings_generated)
     async fn generate_embeddings_for_all_documents(&self) -> AgentResult<(Vec<String>, u32)>;
+
+    /// Get all documents that don't have embeddings yet
+    ///
+    /// # Returns
+    /// Vector of document IDs that don't have embeddings
+    async fn get_documents_without_embeddings(&self) -> AgentResult<Vec<String>>;
 }
 
 #[agent_definition(ephemeral)]
@@ -121,10 +127,30 @@ impl EmbeddingGeneratorAgent for EmbeddingGeneratorAgentImpl {
     async fn generate_embeddings_for_all_documents(&self) -> AgentResult<(Vec<String>, u32)> {
         log::info!("Finding all documents without embeddings");
 
-        // Create a database helper to query for documents
-        let db_config = PostgresDbConfig::from_env()
-            .map_err(|e| format!("Failed to load PostgresDbConfig from environment: {:?}", e))?;
-        let db_helper = DatabaseHelper::new(&db_config.db_url())
+        // Get documents without embeddings
+        let document_ids = self.get_documents_without_embeddings().await?;
+
+        if document_ids.is_empty() {
+            return Ok((vec![], 0));
+        }
+
+        // Generate embeddings for all found documents
+        let total_embeddings = self
+            .generate_embeddings_for_documents(document_ids.clone())
+            .await?;
+
+        log::info!(
+            "Successfully processed {} documents with {} total embeddings",
+            document_ids.len(),
+            total_embeddings
+        );
+
+        Ok((document_ids, total_embeddings))
+    }
+
+    async fn get_documents_without_embeddings(&self) -> AgentResult<Vec<String>> {
+        log::info!("Finding all documents without embeddings");
+        let db_helper = DatabaseHelper::from_env()
             .map_err(|e| format!("Failed to create database helper: {:?}", e))?;
 
         // Query for documents that don't have embeddings or have failed embeddings
@@ -150,23 +176,7 @@ impl EmbeddingGeneratorAgent for EmbeddingGeneratorAgentImpl {
             .collect();
 
         log::info!("Found {} documents without embeddings", document_ids.len());
-
-        if document_ids.is_empty() {
-            return Ok((vec![], 0));
-        }
-
-        // Generate embeddings for all found documents
-        let total_embeddings = self
-            .generate_embeddings_for_documents(document_ids.clone())
-            .await?;
-
-        log::info!(
-            "Successfully processed {} documents with {} total embeddings",
-            document_ids.len(),
-            total_embeddings
-        );
-
-        Ok((document_ids, total_embeddings))
+        Ok(document_ids)
     }
 }
 
