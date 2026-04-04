@@ -21,6 +21,7 @@ package "Golem Cloud" {
     [EmbeddingGeneratorAgent] as embedding_gen #FADBD8
     [DocumentEmbeddingGeneratorAgent] as doc_embedding_gen #E8DAEF
     [S3DocumentLoaderAgent] as s3_loader #D1F2EB
+    [S3DocumentSyncAgent] as s3_sync #FDEBD0
 }
 
 package "External Services" {
@@ -40,6 +41,7 @@ gateway --> document : "RPC\nDocument API"
 gateway --> embedding_gen : "RPC\nBatch Embedding API"
 gateway --> doc_embedding_gen : "RPC\nSingle Document API"
 gateway --> s3_loader : "RPC\nS3 Loading API"
+gateway --> s3_sync : "RPC\nS3 Sync API"
 
 ' Agent-to-agent communication
 search --> postgres : "Vector + Full-text Search"
@@ -54,6 +56,9 @@ doc_embedding_gen --> ollama : "Embedding Generation"
 s3_loader --> s3 : "S3 API\nList/Download Documents"
 s3_loader --> postgres : "Store Documents"
 
+s3_sync --> s3_loader : "RPC\nLoad from all buckets"
+s3_sync --> embedding_gen : "RPC\nGenerate embeddings"
+
 ' Database connections
 postgres --> postgres : "Store:\n- Documents\n- Document Chunks\n- Embeddings"
 
@@ -67,6 +72,7 @@ note right of gateway
   • POST /embeddings/generate → EmbeddingGeneratorAgent
   • POST /embeddings/generate/{id} → DocumentEmbeddingGeneratorAgent
   • POST /s3/load/{namespace} → S3DocumentLoaderAgent
+  • POST /s3/sync → S3DocumentSyncAgent
   - Transforms REST to Golem RPC
 end note
 
@@ -108,6 +114,15 @@ note right of s3_loader
   - Content type detection
   - Automatic metadata generation
   - Document ID creation
+  - State: Ephemeral
+end note
+
+note right of s3_sync
+  <b>S3DocumentSyncAgent</b>
+  - Coordinates synchronization across buckets
+  - Orchestrates loading and embedding generation
+  - Comprehensive sync results with error handling
+  - Tracks success/failure status
   - State: Ephemeral
 end note
 
@@ -155,6 +170,15 @@ note bottom of s3_loader
   2. Download and parse documents
   3. Generate metadata and IDs
   4. Store in PostgreSQL
+end note
+
+note bottom of s3_sync
+  <b>Document Synchronization Flow:</b>
+  1. List all available buckets
+  2. For each bucket: load documents
+  3. Generate embeddings for new documents
+  4. Track success/failure per bucket
+  5. Return comprehensive sync results
 end note
 
 @enduml

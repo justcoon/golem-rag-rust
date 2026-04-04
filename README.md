@@ -61,11 +61,24 @@ S3 integration for document loading:
 
 **Note**: Uses `bucket` and optional `prefix` parameters for flexible S3 path filtering. The namespace is automatically extracted from the actual S3 key path structure (e.g., "legal/contracts/file.pdf" → namespace: "legal/contracts"). Supports any prefix-based filtering for maximum flexibility.
 
+### S3DocumentSyncAgent
+S3 document synchronization and processing coordinator:
+
+**Methods:**
+- `sync_all()` - Synchronize all buckets by loading documents and generating embeddings
+
+**Features:**
+- Coordinates document loading across all S3 buckets
+- Automatically generates embeddings for newly loaded documents
+- Provides comprehensive sync results with success/failure tracking
+- Handles errors gracefully and continues processing other buckets
+- Returns detailed statistics on documents loaded and embeddings generated
+
 ## Architecture
 
 ![Golem RAG System Architecture](architecture.png)
 
-The system consists of 5 core agents running on Golem Cloud, coordinated through an HTTP API Gateway and backed by PostgreSQL with pgvector for persistent storage:
+The system consists of 6 core agents running on Golem Cloud, coordinated through an HTTP API Gateway and backed by PostgreSQL with pgvector for persistent storage:
 
 ### Core Components
 
@@ -102,11 +115,19 @@ The system consists of 5 core agents running on Golem Cloud, coordinated through
 - Bucket-specific document management
 - Automatic namespace extraction from S3 key paths
 
+**S3DocumentSyncAgent**
+- Coordinates synchronization across all S3 buckets
+- Orchestrates document loading and embedding generation
+- Provides comprehensive sync results with error handling
+- Tracks success/failure status for each bucket
+- Returns detailed statistics on processing results
+
 ### Data Flow
 
-1. **Document Ingestion**: S3 (multiple buckets) → S3DocumentLoaderAgent → PostgreSQL
-2. **Embedding Generation**: EmbeddingGeneratorAgent → DocumentEmbeddingGeneratorAgent → Ollama → PostgreSQL
-3. **Search Operations**: API Gateway → SearchAgent → PostgreSQL (vector + full-text) → Results
+1. **Document Synchronization**: S3DocumentSyncAgent → S3DocumentLoaderAgent → EmbeddingGeneratorAgent → PostgreSQL
+2. **Document Ingestion**: S3 (multiple buckets) → S3DocumentLoaderAgent → PostgreSQL
+3. **Embedding Generation**: EmbeddingGeneratorAgent → DocumentEmbeddingGeneratorAgent → Ollama → PostgreSQL
+4. **Search Operations**: API Gateway → SearchAgent → PostgreSQL (vector + full-text) → Results
 
 ### External Services
 
@@ -236,6 +257,13 @@ golem agent invoke 'embedding-generator-agent()' \
   'golem-rust:rag/embedding-generator-agent.{generate-embeddings-for-all-documents}'
 ```
 
+#### S3DocumentSyncAgent
+```bash
+# Synchronize all buckets (load documents and generate embeddings)
+golem agent invoke 's3-document-sync-agent()' \
+  'golem-rust:rag/s3-document-sync-agent.{sync-all}'
+```
+
 ## API Endpoints
 
 ### Search Operations
@@ -325,6 +353,9 @@ POST /s3/list/{bucket}
 
 # List all S3 buckets
 GET /s3/buckets
+
+# Synchronize all buckets (load documents and generate embeddings)
+POST /s3/sync
 ```
 
 **Example: Load from golem-documents bucket with legal prefix**
@@ -333,6 +364,11 @@ POST /s3/load/golem-documents
 {
   "prefix": "general/"
 }
+```
+
+**Example: Synchronize all buckets**
+```bash
+POST /s3/sync
 ```
 
 ## Hybrid Search Configuration
