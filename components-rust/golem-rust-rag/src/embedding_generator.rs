@@ -1,7 +1,7 @@
 use crate::database_helper::DatabaseHelperRagext;
 use crate::models::*;
 use chrono::Utc;
-use common_lib::{DatabaseHelper, EmbeddingClient, PostgresDbConfig};
+use common_lib::{DatabaseHelper, EmbeddingClient};
 use futures::future;
 use golem_rust::{agent_definition, agent_implementation};
 use std::string::String;
@@ -20,7 +20,7 @@ pub trait EmbeddingGeneratorAgent {
     /// # Returns
     /// Total number of embeddings generated across all documents
     async fn generate_embeddings_for_documents(
-        &mut self,
+        &self,
         document_ids: Vec<String>,
     ) -> AgentResult<u32>;
 
@@ -28,7 +28,13 @@ pub trait EmbeddingGeneratorAgent {
     ///
     /// # Returns
     /// Tuple of (document_ids_processed, total_embeddings_generated)
-    async fn generate_embeddings_for_all_documents(&mut self) -> AgentResult<(Vec<String>, u32)>;
+    async fn generate_embeddings_for_all_documents(&self) -> AgentResult<(Vec<String>, u32)>;
+
+    /// Get all documents that don't have embeddings yet
+    ///
+    /// # Returns
+    /// Vector of document IDs that don't have embeddings
+    async fn get_documents_without_embeddings(&self) -> AgentResult<Vec<String>>;
 }
 
 #[agent_definition(ephemeral)]
@@ -42,7 +48,7 @@ pub trait DocumentEmbeddingGeneratorAgent {
     ///
     /// # Returns
     /// Number of embeddings generated for the document
-    async fn generate_embeddings_for_document(&mut self, document_id: String) -> AgentResult<u32>;
+    async fn generate_embeddings_for_document(&self, document_id: String) -> AgentResult<u32>;
 
     /// Remove all embeddings and chunks for a specific document
     ///
@@ -51,7 +57,7 @@ pub trait DocumentEmbeddingGeneratorAgent {
     ///
     /// # Returns
     /// Ok(()) if successful, error message if failed
-    async fn remove_embeddings_for_document(&mut self, document_id: String) -> AgentResult<()>;
+    async fn remove_embeddings_for_document(&self, document_id: String) -> AgentResult<()>;
 
     /// Get embedding status for a document
     async fn get_embedding_status(&self, document_id: String) -> AgentResult<EmbeddingStatus>;
@@ -66,7 +72,7 @@ impl EmbeddingGeneratorAgent for EmbeddingGeneratorAgentImpl {
     }
 
     async fn generate_embeddings_for_documents(
-        &mut self,
+        &self,
         document_ids: Vec<String>,
     ) -> AgentResult<u32> {
         log::info!(
@@ -77,8 +83,8 @@ impl EmbeddingGeneratorAgent for EmbeddingGeneratorAgentImpl {
         // Process all documents in parallel using join_all
         let futures = document_ids.into_iter().map(|document_id| async move {
             // Create a separate document embedding generator for each document
-            let mut doc_generator = DocumentEmbeddingGeneratorAgentImpl::new();
-
+            // let doc_generator = DocumentEmbeddingGeneratorAgentClient::get();
+            let doc_generator = DocumentEmbeddingGeneratorAgentClient::new_phantom();
             match doc_generator
                 .generate_embeddings_for_document(document_id.clone())
                 .await
@@ -118,13 +124,33 @@ impl EmbeddingGeneratorAgent for EmbeddingGeneratorAgentImpl {
         Ok(total_embeddings)
     }
 
-    async fn generate_embeddings_for_all_documents(&mut self) -> AgentResult<(Vec<String>, u32)> {
+    async fn generate_embeddings_for_all_documents(&self) -> AgentResult<(Vec<String>, u32)> {
         log::info!("Finding all documents without embeddings");
 
-        // Create a database helper to query for documents
-        let db_config = PostgresDbConfig::from_env()
-            .map_err(|e| format!("Failed to load PostgresDbConfig from environment: {:?}", e))?;
-        let db_helper = DatabaseHelper::new(&db_config.db_url())
+        // Get documents without embeddings
+        let document_ids = self.get_documents_without_embeddings().await?;
+
+        if document_ids.is_empty() {
+            return Ok((vec![], 0));
+        }
+
+        // Generate embeddings for all found documents
+        let total_embeddings = self
+            .generate_embeddings_for_documents(document_ids.clone())
+            .await?;
+
+        log::info!(
+            "Successfully processed {} documents with {} total embeddings",
+            document_ids.len(),
+            total_embeddings
+        );
+
+        Ok((document_ids, total_embeddings))
+    }
+
+    async fn get_documents_without_embeddings(&self) -> AgentResult<Vec<String>> {
+        log::info!("Finding all documents without embeddings");
+        let db_helper = DatabaseHelper::from_env()
             .map_err(|e| format!("Failed to create database helper: {:?}", e))?;
 
         // Query for documents that don't have embeddings or have failed embeddings
@@ -150,23 +176,7 @@ impl EmbeddingGeneratorAgent for EmbeddingGeneratorAgentImpl {
             .collect();
 
         log::info!("Found {} documents without embeddings", document_ids.len());
-
-        if document_ids.is_empty() {
-            return Ok((vec![], 0));
-        }
-
-        // Generate embeddings for all found documents
-        let total_embeddings = self
-            .generate_embeddings_for_documents(document_ids.clone())
-            .await?;
-
-        log::info!(
-            "Successfully processed {} documents with {} total embeddings",
-            document_ids.len(),
-            total_embeddings
-        );
-
-        Ok((document_ids, total_embeddings))
+        Ok(document_ids)
     }
 }
 
@@ -189,7 +199,7 @@ impl DocumentEmbeddingGeneratorAgent for DocumentEmbeddingGeneratorAgentImpl {
         }
     }
 
-    async fn generate_embeddings_for_document(&mut self, document_id: String) -> AgentResult<u32> {
+    async fn generate_embeddings_for_document(&self, document_id: String) -> AgentResult<u32> {
         log::info!("Generating embeddings for document: {}", document_id);
 
         let db_helper = self.create_db_helper()?;
@@ -253,7 +263,7 @@ impl DocumentEmbeddingGeneratorAgent for DocumentEmbeddingGeneratorAgentImpl {
             .map_err(|e| format!("Failed to get embedding status: {:?}", e))
     }
 
-    async fn remove_embeddings_for_document(&mut self, document_id: String) -> AgentResult<()> {
+    async fn remove_embeddings_for_document(&self, document_id: String) -> AgentResult<()> {
         log::info!("Removing embeddings for document: {}", document_id);
 
         let db_helper = self.create_db_helper()?;
