@@ -202,13 +202,15 @@ impl S3Client {
         }
     }
 
-    pub fn list_objects(&self, bucket: &str, prefix: Option<&str>) -> S3Result<S3ListResponse> {
+    pub fn list_objects(&self, bucket: &str, prefix: Option<&str>, recursive: bool) -> S3Result<S3ListResponse> {
         let endpoint = self.build_endpoint_url(bucket);
         let path = "/";
 
         let mut query_params = Vec::new();
         // Match working AWS CLI format exactly: delimiter=%2F&encoding-type=url&list-type=2&prefix=
-        query_params.push(("delimiter", "/"));
+        if !recursive {
+            query_params.push(("delimiter", "/"));
+        }
         query_params.push(("encoding-type", "url"));
         query_params.push(("list-type", "2"));
         // Always include prefix parameter (empty string for empty prefix)

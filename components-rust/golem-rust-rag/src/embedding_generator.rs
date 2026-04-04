@@ -20,7 +20,7 @@ pub trait EmbeddingGeneratorAgent {
     /// # Returns
     /// Total number of embeddings generated across all documents
     async fn generate_embeddings_for_documents(
-        &mut self,
+        &self,
         document_ids: Vec<String>,
     ) -> AgentResult<u32>;
 
@@ -28,7 +28,7 @@ pub trait EmbeddingGeneratorAgent {
     ///
     /// # Returns
     /// Tuple of (document_ids_processed, total_embeddings_generated)
-    async fn generate_embeddings_for_all_documents(&mut self) -> AgentResult<(Vec<String>, u32)>;
+    async fn generate_embeddings_for_all_documents(&self) -> AgentResult<(Vec<String>, u32)>;
 }
 
 #[agent_definition(ephemeral)]
@@ -42,7 +42,7 @@ pub trait DocumentEmbeddingGeneratorAgent {
     ///
     /// # Returns
     /// Number of embeddings generated for the document
-    async fn generate_embeddings_for_document(&mut self, document_id: String) -> AgentResult<u32>;
+    async fn generate_embeddings_for_document(&self, document_id: String) -> AgentResult<u32>;
 
     /// Remove all embeddings and chunks for a specific document
     ///
@@ -51,7 +51,7 @@ pub trait DocumentEmbeddingGeneratorAgent {
     ///
     /// # Returns
     /// Ok(()) if successful, error message if failed
-    async fn remove_embeddings_for_document(&mut self, document_id: String) -> AgentResult<()>;
+    async fn remove_embeddings_for_document(&self, document_id: String) -> AgentResult<()>;
 
     /// Get embedding status for a document
     async fn get_embedding_status(&self, document_id: String) -> AgentResult<EmbeddingStatus>;
@@ -66,7 +66,7 @@ impl EmbeddingGeneratorAgent for EmbeddingGeneratorAgentImpl {
     }
 
     async fn generate_embeddings_for_documents(
-        &mut self,
+        &self,
         document_ids: Vec<String>,
     ) -> AgentResult<u32> {
         log::info!(
@@ -77,7 +77,7 @@ impl EmbeddingGeneratorAgent for EmbeddingGeneratorAgentImpl {
         // Process all documents in parallel using join_all
         let futures = document_ids.into_iter().map(|document_id| async move {
             // Create a separate document embedding generator for each document
-            let mut doc_generator = DocumentEmbeddingGeneratorAgentImpl::new();
+            let doc_generator = DocumentEmbeddingGeneratorAgentClient::get();
 
             match doc_generator
                 .generate_embeddings_for_document(document_id.clone())
@@ -118,7 +118,7 @@ impl EmbeddingGeneratorAgent for EmbeddingGeneratorAgentImpl {
         Ok(total_embeddings)
     }
 
-    async fn generate_embeddings_for_all_documents(&mut self) -> AgentResult<(Vec<String>, u32)> {
+    async fn generate_embeddings_for_all_documents(&self) -> AgentResult<(Vec<String>, u32)> {
         log::info!("Finding all documents without embeddings");
 
         // Create a database helper to query for documents
@@ -189,7 +189,7 @@ impl DocumentEmbeddingGeneratorAgent for DocumentEmbeddingGeneratorAgentImpl {
         }
     }
 
-    async fn generate_embeddings_for_document(&mut self, document_id: String) -> AgentResult<u32> {
+    async fn generate_embeddings_for_document(&self, document_id: String) -> AgentResult<u32> {
         log::info!("Generating embeddings for document: {}", document_id);
 
         let db_helper = self.create_db_helper()?;
@@ -253,7 +253,7 @@ impl DocumentEmbeddingGeneratorAgent for DocumentEmbeddingGeneratorAgentImpl {
             .map_err(|e| format!("Failed to get embedding status: {:?}", e))
     }
 
-    async fn remove_embeddings_for_document(&mut self, document_id: String) -> AgentResult<()> {
+    async fn remove_embeddings_for_document(&self, document_id: String) -> AgentResult<()> {
         log::info!("Removing embeddings for document: {}", document_id);
 
         let db_helper = self.create_db_helper()?;

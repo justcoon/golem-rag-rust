@@ -21,7 +21,7 @@ pub trait S3DocumentLoaderAgent {
     /// # Returns
     /// List of document IDs that were successfully loaded
     fn load_documents(
-        &mut self,
+        &self,
         bucket: String,
         prefix: Option<String>,
     ) -> AgentResult<Vec<String>>;
@@ -51,7 +51,7 @@ impl S3DocumentLoaderAgent for S3DocumentLoaderAgentImpl {
     }
 
     fn load_documents(
-        &mut self,
+        &self,
         bucket: String,
         prefix: Option<String>,
     ) -> AgentResult<Vec<String>> {
@@ -254,7 +254,7 @@ impl S3DocumentLoaderAgentImpl {
     ) -> AgentResult<Vec<S3DocumentSource>> {
         let list_response = self
             .s3_client
-            .list_objects(bucket, prefix) // Pass prefix directly
+            .list_objects(bucket, prefix, true) // Use recursive listing to get all files in subfolders
             .map_err(|e| format!("Failed to list S3 objects: {:?}", e))?;
 
         // Filter out directories and empty objects, bucket is already set by S3 client
