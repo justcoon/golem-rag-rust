@@ -77,15 +77,45 @@ httpApi:
 
         # S3 document loading endpoints
         - method: POST
-          path: /s3/load/{bucket}/{namespace}
+          path: /s3/load/{bucket}
           binding:
             type: default
             componentName: golem-rust:rag
             response: |
               let bucket: string = request.path.bucket;
-              let namespace: string = request.path.namespace;
+              let prefix: option<string> = request.body.prefix;
               let agent = s3-document-loader-agent();
-              let result = agent.load-documents(bucket, namespace);
+              let result = agent.load-documents(bucket, prefix);
+              match result {
+                ok(r) => { status: 200, body: ok(r)  },         
+                err(e) => { status: 400, body: err({ error: e }) }
+              }
+#
+        # List S3 documents endpoint
+        - method: POST
+          path: /s3/list/{bucket}
+          binding:
+            type: default
+            componentName: golem-rust:rag
+            response: |
+              let bucket: string = request.path.bucket;
+              let prefix: option<string> = request.body.prefix;
+              let agent = s3-document-loader-agent();
+              let result = agent.list-documents(bucket, prefix);
+              match result {
+                ok(r) => { status: 200, body: ok(r)  },         
+                err(e) => { status: 400, body: err({ error: e }) }
+              }
+#
+        # List S3 buckets endpoint
+        - method: GET
+          path: /s3/buckets
+          binding:
+            type: default
+            componentName: golem-rust:rag
+            response: |
+              let agent = s3-document-loader-agent();
+              let result = agent.list-buckets();
               match result {
                 ok(r) => { status: 200, body: ok(r)  },         
                 err(e) => { status: 400, body: err({ error: e }) }

@@ -55,10 +55,11 @@ Individual document embedding processor:
 S3 integration for document loading:
 
 **Methods:**
-- `load_documents(bucket, namespace)` - Load documents from S3 bucket and namespace
-- `list_documents(bucket, namespace)` - List available documents in bucket and namespace
+- `load_documents(bucket, prefix?)` - Load documents from S3 bucket with optional prefix
+- `list_documents(bucket, prefix?)` - List available documents in bucket with optional prefix
+- `list_buckets()` - List all available S3 buckets
 
-**Note**: Uses `bucket` and `namespace` parameters to look for files under the `{namespace}/` prefix in the specified S3 bucket. Supports multiple buckets for different document types or departments.
+**Note**: Uses `bucket` and optional `prefix` parameters for flexible S3 path filtering. The namespace is automatically extracted from the actual S3 key path structure (e.g., "legal/contracts/file.pdf" → namespace: "legal/contracts"). Supports any prefix-based filtering for maximum flexibility.
 
 ## Architecture
 
@@ -95,10 +96,11 @@ The system consists of 5 core agents running on Golem Cloud, coordinated through
 - Embedding status tracking and management
 
 **S3DocumentLoaderAgent**
-- Document loading from multiple S3 buckets and namespaces
+- Document loading from multiple S3 buckets with flexible prefix-based filtering
 - Content type detection (md, txt, pdf, html, json)
 - Automatic metadata generation and document ID creation
 - Bucket-specific document management
+- Automatic namespace extraction from S3 key paths
 
 ### Data Flow
 
@@ -149,12 +151,12 @@ Load documents from local files directly to the PostgreSQL database:
 ./load_to_postgres.sh data/
 ```
 
-#### 2. Via S3 (RustFS) - Multi-Bucket Support
-Load documents from S3-compatible storage using multiple buckets and namespaces:
+#### 2. Via S3 (RustFS) - Flexible Prefix Support
+Load documents from S3-compatible storage using flexible prefix-based filtering:
 
 **Step A: Upload documents to specific bucket**
 ```bash
-# Usage: ./upload_to_s3.sh [bucket] [data_directory] [namespace]
+# Usage: ./upload_to_s3.sh [bucket] [data_directory]
 ./upload_to_s3.sh golem-documents data general
 ```
 
@@ -166,19 +168,26 @@ Load documents from S3-compatible storage using multiple buckets and namespaces:
 
 **Step C: Trigger document loading in the agent**
 ```bash
+# With prefix
 golem agent invoke 's3-document-loader-agent()' \
   'golem-rust:rag/s3-document-loader-agent.{load-documents}' \
-  '"golem-documents" "general"'
+  '"golem-documents"' '"general/"'
+
+# Without prefix (load all documents)
+golem agent invoke 's3-document-loader-agent()' \
+  'golem-rust:rag/s3-document-loader-agent.{load-documents}' \
+  '"golem-documents"' '""'
 ```
 
 **Features:**
-- **Multi-bucket support**: Organize documents across different buckets (legal, technical, general, etc.)
-- Automatic content type detection (md, txt, pdf, html, json)
-- Document ID generation using MD5 hash
-- Metadata creation with timestamps
-- Support for S3 namespaces (prefixes) within each bucket
-- Bucket-specific document management and isolation
-- Robust XML parsing for S3 metadata extraction
+- **Flexible prefix support**: Filter by any S3 prefix (e.g., "legal/", "contracts/2024/")
+- **Multi-bucket support**: Organize documents across different buckets
+- **Automatic content type detection** (md, txt, pdf, html, json)
+- **Document ID generation using MD5 hash**
+- **Metadata creation with timestamps**
+- **Automatic namespace extraction** from S3 key paths
+- **Bucket-specific document management and isolation**
+- **Robust XML parsing** for S3 metadata extraction
 
 ### Building and Running
 
@@ -193,6 +202,38 @@ golem deploy golem.yaml
 curl -X POST http://localhost:9006/search \
   -H "Content-Type: application/json" \
   -d '{"query": "quantum computing", "limit": 5}'
+```
+
+### Agent Invocation Examples
+
+#### DocumentEmbeddingGeneratorAgent
+```bash
+# Generate embeddings for a specific document
+golem agent invoke 'document-embedding-generator-agent()' \
+  'golem-rust:rag/document-embedding-generator-agent.{generate-embeddings-for-document}' \
+  '"doc_123"'
+
+# Remove embeddings for a document
+golem agent invoke 'document-embedding-generator-agent()' \
+  'golem-rust:rag/document-embedding-generator-agent.{remove-embeddings-for-document}' \
+  '"doc_123"'
+
+# Get embedding status for a document
+golem agent invoke 'document-embedding-generator-agent()' \
+  'golem-rust:rag/document-embedding-generator-agent.{get-embedding-status}' \
+  '"doc_123"'
+```
+
+#### EmbeddingGeneratorAgent
+```bash
+# Generate embeddings for multiple documents
+golem agent invoke 'embedding-generator-agent()' \
+  'golem-rust:rag/embedding-generator-agent.{generate-embeddings-for-documents}' \
+  '["doc_123", "doc_456", "doc_789"]'
+
+# Generate embeddings for all documents without embeddings
+golem agent invoke 'embedding-generator-agent()' \
+  'golem-rust:rag/embedding-generator-agent.{generate-embeddings-for-all-documents}'
 ```
 
 ## API Endpoints
@@ -270,12 +311,28 @@ GET /embeddings/status/{document_id}
 ### S3 Document Management
 
 ```bash
-# Load documents from S3 bucket and namespace
-POST /s3/load/{bucket}/{namespace}
-# No body required - bucket and namespace are from path
+# Load documents from S3 bucket with optional prefix
+POST /s3/load/{bucket}
+{
+  "prefix": "general/"  // optional
+}
 
-# Example: Load from golem-documents bucket with general namespace
-POST /s3/load/golem-documents/general
+# List documents in S3 bucket with optional prefix
+POST /s3/list/{bucket}
+{
+  "prefix": "general/"  // optional
+}
+
+# List all S3 buckets
+GET /s3/buckets
+```
+
+**Example: Load from golem-documents bucket with legal prefix**
+```bash
+POST /s3/load/golem-documents
+{
+  "prefix": "general/"
+}
 ```
 
 ## Hybrid Search Configuration
