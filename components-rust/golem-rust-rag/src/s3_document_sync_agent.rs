@@ -1,5 +1,5 @@
-use crate::s3_document_loader::S3DocumentLoaderAgentClient;
 use crate::embedding_generator::EmbeddingGeneratorAgentClient;
+use crate::s3_document_loader::S3DocumentLoaderAgentClient;
 use golem_rust::{agent_definition, agent_implementation, Schema};
 use serde::{Deserialize, Serialize};
 use std::string::String;
@@ -45,7 +45,7 @@ impl S3DocumentSyncAgent for S3DocumentSyncAgentImpl {
 
     async fn sync_all(&self) -> AgentResult<SyncResult> {
         log::info!("Starting S3 document sync for all buckets");
-        
+
         let mut sync_result = SyncResult {
             bucket_results: Vec::new(),
             total_buckets_processed: 0,
@@ -55,8 +55,8 @@ impl S3DocumentSyncAgent for S3DocumentSyncAgentImpl {
         };
 
         // Create S3 document loader client
-        let s3_loader = S3DocumentLoaderAgentClient::get();
-        
+        let s3_loader = S3DocumentLoaderAgentClient::new_phantom();
+
         // Get list of all buckets
         let buckets: Vec<String> = match s3_loader.list_buckets().await {
             Ok(buckets) => buckets,
@@ -66,11 +66,11 @@ impl S3DocumentSyncAgent for S3DocumentSyncAgentImpl {
         };
 
         log::info!("Found {} buckets to sync", buckets.len());
-        
+
         // Process each bucket
         for bucket in buckets {
             log::info!("Processing bucket: {}", bucket);
-            
+
             let mut bucket_result = BucketSyncResult {
                 bucket_name: bucket.clone(),
                 documents_loaded: 0,
@@ -78,26 +78,40 @@ impl S3DocumentSyncAgent for S3DocumentSyncAgentImpl {
                 errors: Vec::new(),
                 success: true,
             };
-            
+
             // Load documents from bucket (this handles change detection)
             match s3_loader.load_documents(bucket.clone(), None).await {
                 Ok(document_ids) => {
                     let document_ids: Vec<String> = document_ids;
                     bucket_result.documents_loaded = document_ids.len();
                     sync_result.total_documents_loaded += document_ids.len();
-                    log::info!("Loaded {} documents from bucket {}", document_ids.len(), bucket);
-                    
+                    log::info!(
+                        "Loaded {} documents from bucket {}",
+                        document_ids.len(),
+                        bucket
+                    );
+
                     // Generate embeddings for the loaded documents if any
                     if !document_ids.is_empty() {
-                        let embedding_generator = EmbeddingGeneratorAgentClient::get();
-                        match embedding_generator.generate_embeddings_for_documents(document_ids).await {
+                        let embedding_generator = EmbeddingGeneratorAgentClient::new_phantom();
+                        match embedding_generator
+                            .generate_embeddings_for_documents(document_ids)
+                            .await
+                        {
                             Ok(embedding_count) => {
                                 bucket_result.embeddings_generated = embedding_count;
                                 sync_result.total_embeddings_generated += embedding_count;
-                                log::info!("Generated {} embeddings for bucket {}", embedding_count, bucket);
+                                log::info!(
+                                    "Generated {} embeddings for bucket {}",
+                                    embedding_count,
+                                    bucket
+                                );
                             }
                             Err(e) => {
-                                let error_msg = format!("Failed to generate embeddings for bucket {}: {:?}", bucket, e);
+                                let error_msg = format!(
+                                    "Failed to generate embeddings for bucket {}: {:?}",
+                                    bucket, e
+                                );
                                 log::error!("{}", error_msg);
                                 bucket_result.errors.push(error_msg);
                                 bucket_result.success = false;
@@ -106,13 +120,14 @@ impl S3DocumentSyncAgent for S3DocumentSyncAgentImpl {
                     }
                 }
                 Err(e) => {
-                    let error_msg = format!("Failed to load documents from bucket {}: {:?}", bucket, e);
+                    let error_msg =
+                        format!("Failed to load documents from bucket {}: {:?}", bucket, e);
                     log::error!("{}", error_msg);
                     bucket_result.errors.push(error_msg);
                     bucket_result.success = false;
                 }
             }
-            
+
             sync_result.bucket_results.push(bucket_result);
             sync_result.total_buckets_processed += 1;
         }
@@ -122,7 +137,11 @@ impl S3DocumentSyncAgent for S3DocumentSyncAgentImpl {
             sync_result.total_buckets_processed,
             sync_result.total_documents_loaded,
             sync_result.total_embeddings_generated,
-            sync_result.bucket_results.iter().map(|r| r.errors.len()).sum::<usize>()
+            sync_result
+                .bucket_results
+                .iter()
+                .map(|r| r.errors.len())
+                .sum::<usize>()
         );
 
         Ok(sync_result)

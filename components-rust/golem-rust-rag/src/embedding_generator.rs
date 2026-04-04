@@ -83,8 +83,8 @@ impl EmbeddingGeneratorAgent for EmbeddingGeneratorAgentImpl {
         // Process all documents in parallel using join_all
         let futures = document_ids.into_iter().map(|document_id| async move {
             // Create a separate document embedding generator for each document
-            let doc_generator = DocumentEmbeddingGeneratorAgentClient::get();
-
+            // let doc_generator = DocumentEmbeddingGeneratorAgentClient::get();
+            let doc_generator = DocumentEmbeddingGeneratorAgentClient::new_phantom();
             match doc_generator
                 .generate_embeddings_for_document(document_id.clone())
                 .await

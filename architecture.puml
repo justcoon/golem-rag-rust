@@ -137,7 +137,6 @@ note right of ollama
   - Local embedding generation
   - Configurable models
   - Fallback support
-  - Model: nomic-embed-text (default)
 end note
 
 ' Add data flow annotations
