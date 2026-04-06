@@ -202,7 +202,12 @@ impl S3Client {
         }
     }
 
-    pub fn list_objects(&self, bucket: &str, prefix: Option<&str>, recursive: bool) -> S3Result<S3ListResponse> {
+    pub fn list_objects(
+        &self,
+        bucket: &str,
+        prefix: Option<&str>,
+        recursive: bool,
+    ) -> S3Result<S3ListResponse> {
         let endpoint = self.build_endpoint_url(bucket);
         let path = "/";
 
