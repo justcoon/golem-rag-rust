@@ -436,6 +436,43 @@ The system uses PostgreSQL with the following key tables:
 
 ## Development
 
+### Feature Implementation Workflow
+
+This project follows a structured 3-phase feature implementation process:
+
+1. **Plan**: Create detailed implementation plan using `templates/feature-plan.md`
+2. **Confirm**: Get plan reviewed and approved before implementation
+3. **Implement**: Build feature with quality gates (build, format, lint, test)
+
+See `docs/feature-implementation-workflow.md` for complete workflow details.
+
+### Skills & Capabilities
+See `.agents/skills/feature-development/SKILL.md` for required development skills, competency levels, and onboarding guidance.
+
+### Quick Commands
+
+```bash
+# Complete quality gate check
+make quality-check
+
+# Individual quality gates
+make build          # Build all components
+make fmt-check      # Check formatting
+make lint           # Run clippy
+make test           # Run tests
+
+# Format code
+make fmt
+
+# Pre-push validation
+make pre-push
+
+# Install git hooks (run once)
+make install-hooks
+```
+
+### Manual Commands
+
 ```bash
 # Run clippy and fmt
 cargo clippy --all-targets --all-features -- -D warnings

@@ -1,0 +1,31 @@
+#!/bin/sh
+# Pre-commit hook for Golem RAG System
+# Ensures code quality before allowing commits
+
+set -e
+
+echo "🔍 Running pre-commit quality gates..."
+
+# Check formatting
+if ! cargo fmt --all --check; then
+    echo "❌ Code formatting check failed."
+    echo "   Run 'make fmt' or 'cargo fmt --all' to fix formatting."
+    exit 1
+fi
+
+# Run clippy
+if ! cargo clippy --all-targets --all-features -- -D warnings; then
+    echo "❌ Clippy check failed."
+    echo "   Fix the warnings above and try again."
+    exit 1
+fi
+
+# Run tests
+if ! cargo test; then
+    echo "❌ Tests failed."
+    echo "   Fix the failing tests and try again."
+    exit 1
+fi
+
+echo "✅ Pre-commit quality gates passed!"
+exit 0
