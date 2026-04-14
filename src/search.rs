@@ -1,8 +1,6 @@
 use crate::models::*;
 use crate::encode_params;
 use crate::common_lib::database::DatabaseHelper;
-use crate::common_lib::database::decode::DbResultDecoder;
-use crate::common_lib::database::decode::Single;
 use golem_rust::{agent_definition, agent_implementation};
 use std::string::String;
 use crate::common_lib::embedding_client::EmbeddingClient;

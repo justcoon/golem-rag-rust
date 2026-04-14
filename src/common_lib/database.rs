@@ -118,11 +118,11 @@ pub mod decode {
     #[macro_export]
     macro_rules! db_value_decoder_json {
         ($t:ty) => {
-            impl $crate::database::decode::DbValueDecoder for $t {
-                fn decode(value: &$crate::database::PostgresDbValue) -> anyhow::Result<Self> {
+            impl $crate::common_lib::database::decode::DbValueDecoder for $t {
+                fn decode(value: &$crate::common_lib::database::PostgresDbValue) -> anyhow::Result<Self> {
                     match value {
-                        $crate::database::PostgresDbValue::Jsonb(s)
-                        | $crate::database::PostgresDbValue::Json(s) => serde_json::from_str(s)
+                        $crate::common_lib::database::PostgresDbValue::Jsonb(s)
+                        | $crate::common_lib::database::PostgresDbValue::Json(s) => serde_json::from_str(s)
                             .map_err(|e| {
                                 anyhow::anyhow!(
                                     "Failed to parse JSON for {}: {}",
@@ -182,20 +182,20 @@ pub mod decode {
     #[macro_export]
     macro_rules! db_row_decoder {
         ($struct_name:ident { $($field:ident),* $(,)? }) => {
-            impl $crate::database::decode::DbRowDecoder for $struct_name {
+            impl $crate::common_lib::database::decode::DbRowDecoder for $struct_name {
                 fn decode_row(
-                    row: &$crate::database::PostgresDbRow,
-                    columns: &[$crate::database::PostgresDbColumn],
+                    row: &$crate::common_lib::database::PostgresDbRow,
+                    columns: &[$crate::common_lib::database::PostgresDbColumn],
                 ) -> anyhow::Result<Self> {
                     let find_idx = |name: &str| {
-                        <Self as $crate::database::decode::DbRowDecoder>::find_column_index(columns, name)
+                        <Self as $crate::common_lib::database::decode::DbRowDecoder>::find_column_index(columns, name)
                     };
 
                     Ok(Self {
                         $(
                             $field: {
                                 let idx = find_idx(stringify!($field))?;
-                                <Self as $crate::database::decode::DbRowDecoder>::decode_field(row, idx, stringify!($field))?
+                                <Self as $crate::common_lib::database::decode::DbRowDecoder>::decode_field(row, idx, stringify!($field))?
                             },
                         )*
                     })
@@ -353,17 +353,17 @@ pub mod encode {
     #[macro_export]
     macro_rules! db_value_encoder_json {
         ($t:ty) => {
-            impl $crate::database::encode::DbValueEncoder for $t {
-                fn encode(self) -> $crate::database::PostgresDbValue {
-                    $crate::database::PostgresDbValue::Jsonb(
+            impl $crate::common_lib::database::encode::DbValueEncoder for $t {
+                fn encode(self) -> $crate::common_lib::database::PostgresDbValue {
+                    $crate::common_lib::database::PostgresDbValue::Jsonb(
                         serde_json::to_string(&self).unwrap_or_else(|_| "null".to_string()),
                     )
                 }
             }
 
-            impl $crate::database::encode::DbValueEncoder for &$t {
-                fn encode(self) -> $crate::database::PostgresDbValue {
-                    $crate::database::PostgresDbValue::Jsonb(
+            impl $crate::common_lib::database::encode::DbValueEncoder for &$t {
+                fn encode(self) -> $crate::common_lib::database::PostgresDbValue {
+                    $crate::common_lib::database::PostgresDbValue::Jsonb(
                         serde_json::to_string(self).unwrap_or_else(|_| "null".to_string()),
                     )
                 }
@@ -593,7 +593,7 @@ macro_rules! encode_params {
     ($($val:expr),* $(,)?) => {
         vec![
             $(
-                $crate::database::encode::DbValueEncoder::encode($val),
+                $crate::common_lib::database::encode::DbValueEncoder::encode($val),
             )*
         ]
     };

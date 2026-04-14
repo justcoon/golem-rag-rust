@@ -1,5 +1,5 @@
 [package]
-name = "golem_rust5_rust_main"
+name = "golem_rust_rag"
 version = "0.0.1"
 edition = "2024"
 
