@@ -119,17 +119,20 @@ pub mod decode {
     macro_rules! db_value_decoder_json {
         ($t:ty) => {
             impl $crate::common_lib::database::decode::DbValueDecoder for $t {
-                fn decode(value: &$crate::common_lib::database::PostgresDbValue) -> anyhow::Result<Self> {
+                fn decode(
+                    value: &$crate::common_lib::database::PostgresDbValue,
+                ) -> anyhow::Result<Self> {
                     match value {
                         $crate::common_lib::database::PostgresDbValue::Jsonb(s)
-                        | $crate::common_lib::database::PostgresDbValue::Json(s) => serde_json::from_str(s)
-                            .map_err(|e| {
+                        | $crate::common_lib::database::PostgresDbValue::Json(s) => {
+                            serde_json::from_str(s).map_err(|e| {
                                 anyhow::anyhow!(
                                     "Failed to parse JSON for {}: {}",
                                     stringify!($t),
                                     e
                                 )
-                            }),
+                            })
+                        }
                         _ => Err(anyhow::anyhow!(
                             "Expected Jsonb or Json for {}, got {:?}",
                             stringify!($t),

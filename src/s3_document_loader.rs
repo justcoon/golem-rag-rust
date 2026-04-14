@@ -1,10 +1,10 @@
-use crate::database_helper::DatabaseHelperRagext;
-use crate::models::*;
-use chrono::DateTime;
 use crate::common_lib::database::DatabaseHelper;
 use crate::common_lib::s3_client::S3Client;
 use crate::common_lib::s3_client::S3DocumentSource;
+use crate::database_helper::DatabaseHelperRagext;
 use crate::encode_params;
+use crate::models::*;
+use chrono::DateTime;
 
 use golem_rust::{agent_definition, agent_implementation};
 use std::string::String;
@@ -84,7 +84,11 @@ impl S3DocumentLoaderAgent for S3DocumentLoaderAgentImpl {
                             ) {
                                 (Ok(s3_dt), Ok(db_dt)) => s3_dt > db_dt,
                                 _ => {
-                                    log::warn!("Failed to parse timestamps for comparison, falling back to string comparison. S3: {}, DB: {}", s3_doc.last_modified, db_timestamp);
+                                    log::warn!(
+                                        "Failed to parse timestamps for comparison, falling back to string comparison. S3: {}, DB: {}",
+                                        s3_doc.last_modified,
+                                        db_timestamp
+                                    );
                                     s3_doc.last_modified > *db_timestamp
                                 }
                             }

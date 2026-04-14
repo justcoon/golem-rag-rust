@@ -1,8 +1,8 @@
+use crate::common_lib::database::DatabaseHelper;
+use crate::common_lib::embedding_client::EmbeddingClient;
 use crate::database_helper::DatabaseHelperRagext;
 use crate::models::*;
 use chrono::Utc;
-use crate::common_lib::embedding_client::EmbeddingClient;
-use crate::common_lib::database::DatabaseHelper;
 use futures::future;
 use golem_rust::{agent_definition, agent_implementation};
 use std::string::String;

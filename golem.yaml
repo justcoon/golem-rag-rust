@@ -59,3 +59,4 @@ httpApi:
     - domain: localhost:9006
       agents:
         Tasks: {}
+        SearchAgent: {}

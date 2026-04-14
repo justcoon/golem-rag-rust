@@ -1,4 +1,6 @@
-use crate::common_lib::database::{DbRowDecoder, DbValueDecoder, PostgresDbColumn, PostgresDbRow, PostgresDbValue};
+use crate::common_lib::database::{
+    DbRowDecoder, DbValueDecoder, PostgresDbColumn, PostgresDbRow, PostgresDbValue,
+};
 use golem_rust::Schema;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;

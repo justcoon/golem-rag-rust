@@ -1,7 +1,7 @@
-use crate::models::*;
-use anyhow::Result;
 use crate::common_lib::database::DatabaseHelper;
 use crate::encode_params;
+use crate::models::*;
+use anyhow::Result;
 
 pub trait DatabaseHelperRagext {
     fn delete_from_tables(&self, document_id: &str, tables: &[&str]) -> Result<()>;

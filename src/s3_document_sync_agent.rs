@@ -1,7 +1,7 @@
 use crate::embedding_generator::EmbeddingGeneratorAgentClient;
 use crate::s3_document_loader::S3DocumentLoaderAgentClient;
 use futures::future;
-use golem_rust::{agent_definition, agent_implementation, Schema};
+use golem_rust::{Schema, agent_definition, agent_implementation};
 use serde::{Deserialize, Serialize};
 use std::string::String;
 
@@ -111,7 +111,9 @@ impl S3DocumentSyncAgent for S3DocumentSyncAgentImpl {
         let s3_loader = S3DocumentLoaderAgentClient::new_phantom();
 
         // Get list of all buckets
-        let buckets: Vec<String> = s3_loader.list_buckets().await
+        let buckets: Vec<String> = s3_loader
+            .list_buckets()
+            .await
             .map_err(|e| format!("Failed to list S3 buckets: {:?}", e))?;
 
         log::info!("Found {} buckets to sync", buckets.len());
