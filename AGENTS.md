@@ -1,3 +1,31 @@
+<!-- golem-managed:guide:rust:start -->
+<!-- Golem manages this section. Do not edit manually. -->
+
+# Skills
+
+This project includes coding-agent skills in `.agents/skills/`. Load a skill when the task matches its description.
+
+| Skill | Description |
+|-------|-------------|
+| `golem-new-project` | Creating a new Golem application project with `golem new` |
+| `golem-build` | Building a Golem application with `golem build` |
+| `golem-deploy` | Deploying a Golem application with `golem deploy` |
+| `golem-add-rust-crate` | Adding a Rust crate dependency to the project |
+| `golem-add-agent-rust` | Adding a new agent type to a Rust Golem component |
+| `golem-configure-durability-rust` | Choosing between durable and ephemeral agents |
+| `golem-annotate-agent-rust` | Adding prompt and description annotations to agent methods |
+| `golem-call-another-agent-rust` | Calling another agent and awaiting the result (RPC) |
+| `golem-fire-and-forget-rust` | Triggering an agent invocation without waiting for the result |
+| `golem-schedule-future-call-rust` | Scheduling a future agent invocation |
+| `golem-atomic-block-rust` | Atomic blocks, persistence control, and idempotency |
+| `golem-add-transactions-rust` | Saga-pattern transactions with compensation |
+| `golem-add-http-endpoint-rust` | Exposing an agent over HTTP with mount paths and endpoint annotations |
+| `golem-http-params-rust` | Mapping path, query, header, and body parameters for HTTP endpoints |
+| `golem-add-http-auth-rust` | Enabling authentication on HTTP endpoints |
+| `golem-add-cors-rust` | Configuring CORS allowed origins for HTTP endpoints |
+| `golem-configure-api-domain` | Configuring HTTP API domain deployments and security schemes in golem.yaml |
+| `golem-make-http-request-rust` | Making outgoing HTTP requests from agent code using wstd |
+
 # Golem Application Development Guide (Rust)
 
 ## Overview
@@ -20,27 +48,35 @@ Key concepts:
 ## Project Structure
 
 ```
-golem.yaml                        # Root application manifest
-Cargo.toml                        # Workspace Cargo.toml
-components-rust/                  # Component crates (each becomes a WASM component)
-  <component-name>/
-    src/lib.rs                    # Agent definitions and implementations
-    Cargo.toml                    # Must use crate-type = ["cdylib"]
-    golem.yaml                    # Component-level manifest (templates, env, dependencies)
-    .wit/wit/                     # WIT interface files (auto-managed)
-common-rust/                      # Shared library crates (not compiled to WASM directly)
-  common-lib/
-    src/lib.rs
-    Cargo.toml
-  golem.yaml                     # Build templates for all Rust components
-.wit/wit/deps/                   # Shared WIT dependencies (auto-managed)
-golem-temp/                      # Build artifacts (gitignored)
+# Single-component app
+golem.yaml                        # Golem Application Manifest (contains components.<name>.dir = ".")
+Cargo.toml                        # Component crate manifest
+src/
+  lib.rs                          # Module entry point; re-exports of agents
+  <agent_name>.rs                 # Agent definitions and implementations
+
+# Multi-component app
+golem.yaml                        # Golem Application Manifest (components map with explicit dir per component)
+<component-a>/
+  Cargo.toml                      # Component crate manifest (must use crate-type = ["cdylib"])
+  src/
+    lib.rs                        # Module entry point; re-exports of agents
+    <agent_name>.rs               # Agent definitions and implementations
+<component-b>/
+  Cargo.toml                      # Component crate manifest (must use crate-type = ["cdylib"])
+  src/
+    lib.rs                        # Module entry point; re-exports of agents
+    <agent_name>.rs               # Agent definitions and implementations
+
+golem-temp/                       # Build artifacts (gitignored)
+  common/                         # Shared Golem templates (generated on-demand)
+    rust/                         # Shared Golem Rust templates
+      golem.yaml                  # Build templates for all Rust components
 ```
 
 ## Prerequisites
 
 - Rust with `wasm32-wasip1` target: `rustup target add wasm32-wasip1`
-- `cargo-component` version 0.21.1: `cargo install --force cargo-component@0.21.1`
 - Golem CLI (`golem`): download from https://github.com/golemcloud/golem/releases
 
 ## Building
@@ -194,211 +230,29 @@ err("oops")   // explicit err
 
 ## Defining Agents
 
-Agents are defined using the `#[agent_definition]` and `#[agent_implementation]` macros from `golem-rust`:
-
-```rust
-use golem_rust::{agent_definition, agent_implementation};
-
-#[agent_definition]
-pub trait MyAgent {
-    // Constructor parameters form the agent's identity
-    fn new(name: String) -> Self;
-
-    // Agent methods — can be sync or async
-    fn get_count(&self) -> u32;
-    fn increment(&mut self) -> u32;
-    async fn fetch_data(&self, url: String) -> String;
-}
-
-struct MyAgentImpl {
-    name: String,
-    count: u32,
-}
-
-#[agent_implementation]
-impl MyAgent for MyAgentImpl {
-    fn new(name: String) -> Self {
-        Self { name, count: 0 }
-    }
-
-    fn get_count(&self) -> u32 {
-        self.count
-    }
-
-    fn increment(&mut self) -> u32 {
-        self.count += 1;
-        self.count
-    }
-
-    async fn fetch_data(&self, url: String) -> String {
-        // Use wstd::http for HTTP requests
-        todo!()
-    }
-}
-```
-
-### Ephemeral agents
-
-By default agents are durable (state persists indefinitely). For stateless per-invocation agents:
-
-```rust
-#[agent_definition(ephemeral)]
-pub trait StatelessAgent {
-    fn new() -> Self;
-    fn handle(&self, input: String) -> String;
-}
-```
-
-### Custom types
-
-All parameter and return types must implement the `Schema` trait. For custom types, derive it along with `IntoValue` and `FromValueAndType`:
-
-```rust
-use golem_rust::Schema;
-use serde::{Serialize, Deserialize};
-
-#[derive(Clone, Schema, Serialize, Deserialize)]
-pub struct MyData {
-    pub field1: String,
-    pub field2: u32,
-}
-```
-
-Shared types can be placed in `common-rust/common-lib/` and used across components.
-
-### Method annotations
-
-```rust
-use golem_rust::{agent_definition, prompt, description};
-
-#[agent_definition]
-pub trait MyAgent {
-    fn new(name: String) -> Self;
-
-    #[prompt("Increment the counter")]
-    #[description("Increments the counter by 1 and returns the new value")]
-    fn increment(&mut self) -> u32;
-}
-```
-
-## Agent-to-Agent Communication (RPC)
-
-The `#[agent_definition]` macro auto-generates a `<AgentName>Client` type for calling agents remotely:
-
-```rust
-// Awaited call (blocks until result)
-let other = OtherAgentClient::get("param".to_string());
-let result = other.some_method(arg).await;
-
-// Fire-and-forget (returns immediately)
-other.trigger_some_method(arg);
-
-// Scheduled invocation
-use golem_rust::wasm_rpc::golem_rpc_0_2_x::types::Datetime;
-other.schedule_some_method(Datetime { seconds: ts, nanoseconds: 0 }, arg);
-
-// Phantom agents (multiple instances with same constructor params)
-let phantom = OtherAgentClient::new_phantom("param".to_string());
-let id = phantom.phantom_id().unwrap();
-let same = OtherAgentClient::get_phantom(id, "param".to_string());
-```
-
-Avoid RPC cycles (A calls B calls A) — use `trigger_` to break deadlocks.
-
-## Durability Features
-
-Golem provides **automatic durable execution** — all agents are durable by default without any special code. State is persisted via an oplog (operation log) and agents survive failures, restarts, and updates transparently.
-
-The APIs below are **advanced controls** that most agents will never need. Only use them when you have specific requirements around persistence granularity, idempotency, or transactional compensation:
-
-```rust
-use golem_rust::{
-    with_persistence_level, PersistenceLevel,
-    with_idempotence_mode,
-    atomically,
-    oplog_commit,
-    generate_idempotency_key,
-    with_retry_policy, RetryPolicy,
-};
-
-// Atomic operations — retried together on failure
-let result = atomically(|| {
-let a = side_effect_1();
-let b = side_effect_2(a);
-(a, b)
-});
-
-// Control persistence level
-with_persistence_level(PersistenceLevel::PersistNothing, || {
-// No oplog entries — side effects replayed on recovery
-});
-
-// Control idempotence mode
-with_idempotence_mode(false, || {
-// HTTP requests won't be retried if result is uncertain
-});
-
-// Ensure oplog is replicated
-oplog_commit(3); // Wait for 3 replicas
-
-// Generate a durable idempotency key (persisted, safe for payment APIs etc.)
-let key = generate_idempotency_key();
-```
-
-### Transactions
-
-For saga-pattern compensation:
-
-```rust
-use golem_rust::{fallible_transaction, infallible_transaction, operation};
-
-let op1 = operation(
-|input: String| { /* execute */ Ok(result) },
-|input: String, result| { /* compensate/rollback */ Ok(()) },
-);
-
-// Fallible: compensates on failure, returns error
-let result = fallible_transaction(|tx| {
-let r = tx.execute(op1, "input".to_string())?;
-Ok(r)
-});
-
-// Infallible: compensates and retries on failure
-let result = infallible_transaction(|tx| {
-tx.execute(op1, "input".to_string());
-42
-});
-```
-
-## Adding New Components
-
-```shell
-golem component new rust my:new-component
-```
-
-This creates a new directory under `components-rust/` with the standard structure.
+Load the `golem-add-agent-rust` skill for defining agents and custom types. See also the skill table above for durability configuration, annotations, RPC, atomic blocks, and transactions.
 
 ## Application Manifest (golem.yaml)
 
-- Root `golem.yaml`: app name, includes, witDeps, environments
-- `common-rust/golem.yaml`: build templates (debug/release profiles) shared by all Rust components
-- `components-rust/<name>/golem.yaml`: component-specific config (templates reference, env vars, dependencies)
+- Root `golem.yaml`: app name, includes, witDeps, environments, and `components` entries
+- `golem-temp/common/rust/golem.yaml`: generated on-demand build templates (debug/release profiles) shared by all Rust components
 
-Key fields in component manifest:
+Key fields in each `components.<name>` entry:
+- `dir`: component directory (`"."` for single-component apps)
 - `templates`: references a template from common golem.yaml (e.g., `rust`)
 - `env`: environment variables passed to agents at runtime
 - `dependencies`: WASM dependencies (e.g., LLM providers from golem-ai)
 
 ## Available Libraries
 
-From workspace `Cargo.toml`:
+From your component (or shared workspace) `Cargo.toml`:
 - `golem-rust` (with `export_golem_agentic` feature) — agent framework, durability, transactions
 - `wstd` — WASI standard library (HTTP client via `wstd::http`, async I/O, etc.)
 - `log` — logging (uses `wasi-logger` backend, logs visible via `golem agent stream`)
 - `serde` / `serde_json` — serialization
 - Optional: `golem-wasi-http` — advanced HTTP client alternative
 
-To enable AI features, uncomment `golem_ai` feature in workspace `Cargo.toml` and uncomment the relevant provider dependency in the component's `golem.yaml`.
+To enable AI features, add the relevant golem-ai provider crate as a dependency (e.g., `golem-ai-llm-openai`). 
 
 ## Debugging
 
@@ -417,13 +271,12 @@ golem agent invoke '<agent-id>' 'method' args   # Invoke method directly
 - All agent method parameters passed by value (no references)
 - All custom types need `Schema` derive (plus `IntoValue` and `FromValueAndType`, which `Schema` implies)
 - `proc-macro-enable` must be true in rust-analyzer settings (already configured in `.vscode/settings.json`)
-- Do not manually edit files in `.wit/` directories — they are auto-managed by the build tooling
-- `golem-temp/` and `target/` are gitignored build artifacts
+- `golem-temp/` and `target/` are gitignored build artifacts, do not manually edit files in those directories
 
 ## Formatting and Linting
 
 ```shell
-cargo fmt                        # Format code
+cargo fmt                            # Format code
 cargo clippy --target wasm32-wasip1  # Lint (must target wasm32-wasip1)
 ```
 
@@ -432,3 +285,4 @@ cargo clippy --target wasm32-wasip1  # Lint (must target wasm32-wasip1)
 - App manifest reference: https://learn.golem.cloud/app-manifest
 - Full docs: https://learn.golem.cloud
 - golem-rust SDK: https://docs.rs/golem-rust
+<!-- golem-managed:guide:rust:end -->
