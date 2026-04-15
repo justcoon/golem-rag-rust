@@ -1,7 +1,8 @@
 use crate::embedding_generator::EmbeddingGeneratorAgentClient;
+use crate::models::LoadDocumentsRequest;
 use crate::s3_document_loader::S3DocumentLoaderAgentClient;
 use futures::future;
-use golem_rust::{Schema, agent_definition, agent_implementation};
+use golem_rust::{Schema, agent_definition, agent_implementation, endpoint};
 use serde::{Deserialize, Serialize};
 use std::string::String;
 
@@ -25,7 +26,7 @@ pub struct BucketSyncResult {
     pub success: bool,
 }
 
-#[agent_definition(ephemeral)]
+#[agent_definition(mount = "/s3/sync", ephemeral)]
 pub trait S3DocumentSyncAgent {
     fn new() -> Self;
 
@@ -33,6 +34,7 @@ pub trait S3DocumentSyncAgent {
     ///
     /// # Returns
     /// SyncResult with statistics about the sync operation
+    #[endpoint(post = "")]
     async fn sync_all(&self) -> AgentResult<SyncResult>;
 }
 
@@ -50,7 +52,10 @@ async fn sync_bucket(bucket: String, s3_loader: &S3DocumentLoaderAgentClient) ->
     };
 
     // Load documents from bucket (this handles change detection)
-    match s3_loader.load_documents(bucket.clone(), None).await {
+    match s3_loader
+        .load_documents(bucket.clone(), LoadDocumentsRequest { prefix: None })
+        .await
+    {
         Ok(document_ids) => {
             let document_ids: Vec<String> = document_ids;
             bucket_result.documents_loaded = document_ids.len();

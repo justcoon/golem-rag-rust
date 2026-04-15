@@ -58,5 +58,9 @@ httpApi:
     local:
     - domain: localhost:9006
       agents:
-        Tasks: {}
         SearchAgent: {}
+        DocumentAgent: {}
+        S3DocumentLoaderAgent: {}
+        S3DocumentSyncAgent: {}
+        EmbeddingGeneratorAgent: {}
+        DocumentEmbeddingGeneratorAgent: {}

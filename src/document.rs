@@ -2,12 +2,12 @@ use crate::common_lib::database::{DatabaseHelper, DbValueEncoder, PostgresDbValu
 use crate::database_helper::DatabaseHelperRagext;
 use crate::encode_params;
 use crate::models::*;
-use golem_rust::{agent_definition, agent_implementation};
+use golem_rust::{agent_definition, agent_implementation, endpoint};
 use std::string::String;
 
 pub type AgentResult<T> = std::result::Result<T, String>;
 
-#[agent_definition(ephemeral)]
+#[agent_definition(mount = "/documents", ephemeral)]
 pub trait DocumentAgent {
     fn new() -> Self;
 
@@ -18,6 +18,7 @@ pub trait DocumentAgent {
     ///
     /// # Returns
     /// Complete Document with metadata, or None if not found
+    #[endpoint(get = "/{document_id}")]
     fn get_document(&self, document_id: String) -> AgentResult<Option<Document>>;
 
     /// Get document metadata only

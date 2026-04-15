@@ -249,6 +249,30 @@ pub struct HybridSearchConfig {
     pub enable_keyword: bool,  // Enable keyword search
 }
 
+#[derive(Clone, Debug, Schema, Serialize, Deserialize)]
+pub struct FindSimilarDocumentsRequest {
+    pub document_id: String,
+    pub limit: Option<u64>,
+}
+
+#[derive(Clone, Debug, Schema, Serialize, Deserialize)]
+pub struct SearchRequest {
+    pub query: String,
+    pub filters: Option<SearchFilters>,
+    pub limit: Option<u64>,
+    pub threshold: Option<f32>,
+    pub config: Option<HybridSearchConfig>,
+}
+
+#[derive(Clone, Debug, Schema, Serialize, Deserialize)]
+pub struct LoadDocumentsRequest {
+    pub prefix: Option<String>,
+}
+
+#[derive(Clone, Debug, Schema, Serialize, Deserialize)]
+pub struct ListDocumentsRequest {
+    pub prefix: Option<String>,
+}
 impl Default for HybridSearchConfig {
     fn default() -> Self {
         Self {

@@ -6,34 +6,41 @@ use crate::encode_params;
 use crate::models::*;
 use chrono::DateTime;
 
-use golem_rust::{agent_definition, agent_implementation};
+use golem_rust::{agent_definition, agent_implementation, endpoint};
 use std::string::String;
 use uuid::Uuid;
 
 pub type AgentResult<T> = std::result::Result<T, String>;
 
-#[agent_definition]
+#[agent_definition(mount = "/s3")]
 pub trait S3DocumentLoaderAgent {
     fn new() -> Self;
 
     /// Load documents from S3 using bucket and optional prefix
     ///
     /// # Arguments
-    /// * `bucket` - S3 bucket name
-    /// * `prefix` - Optional S3 key prefix to filter documents
+    /// * `bucket` - S3 bucket name from path
+    /// * `request` - Request containing optional prefix
     ///
     /// # Returns
     /// List of document IDs that were successfully loaded
-    fn load_documents(&self, bucket: String, prefix: Option<String>) -> AgentResult<Vec<String>>;
+    #[endpoint(post = "/load/{bucket}")]
+    fn load_documents(
+        &self,
+        bucket: String,
+        request: LoadDocumentsRequest,
+    ) -> AgentResult<Vec<String>>;
 
     /// List available S3 documents for a bucket with optional prefix
+    #[endpoint(post = "/list/{bucket}")]
     fn list_documents(
         &self,
         bucket: String,
-        prefix: Option<String>,
+        request: ListDocumentsRequest,
     ) -> AgentResult<Vec<S3DocumentSource>>;
 
     /// List all available S3 buckets
+    #[endpoint(get = "/buckets")]
     fn list_buckets(&self) -> AgentResult<Vec<String>>;
 }
 
@@ -50,16 +57,20 @@ impl S3DocumentLoaderAgent for S3DocumentLoaderAgentImpl {
         Self { s3_client }
     }
 
-    fn load_documents(&self, bucket: String, prefix: Option<String>) -> AgentResult<Vec<String>> {
+    fn load_documents(
+        &self,
+        bucket: String,
+        request: LoadDocumentsRequest,
+    ) -> AgentResult<Vec<String>> {
         log::info!(
             "Loading documents from bucket: {}, prefix: {:?}",
             bucket,
-            prefix
+            request.prefix
         );
 
         // Step 1: List documents in S3 using prefix directly
         let s3_documents = self
-            .list_s3_documents(&bucket, prefix.as_deref())
+            .list_s3_documents(&bucket, request.prefix.as_deref())
             .map_err(|e| format!("Failed to list S3 documents: {:?}", e))?;
 
         // Step 2: Process each document
@@ -217,7 +228,7 @@ impl S3DocumentLoaderAgent for S3DocumentLoaderAgentImpl {
             "Successfully loaded {} documents from bucket: {}, prefix: {:?}",
             loaded_document_ids.len(),
             bucket,
-            prefix
+            request.prefix
         );
         Ok(loaded_document_ids)
     }
@@ -225,9 +236,9 @@ impl S3DocumentLoaderAgent for S3DocumentLoaderAgentImpl {
     fn list_documents(
         &self,
         bucket: String,
-        prefix: Option<String>,
+        request: ListDocumentsRequest,
     ) -> AgentResult<Vec<S3DocumentSource>> {
-        self.list_s3_documents(&bucket, prefix.as_deref())
+        self.list_s3_documents(&bucket, request.prefix.as_deref())
     }
 
     fn list_buckets(&self) -> AgentResult<Vec<String>> {

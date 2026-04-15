@@ -4,12 +4,12 @@ use crate::database_helper::DatabaseHelperRagext;
 use crate::models::*;
 use chrono::Utc;
 use futures::future;
-use golem_rust::{agent_definition, agent_implementation};
+use golem_rust::{agent_definition, agent_implementation, endpoint};
 use std::string::String;
 
 pub type AgentResult<T> = std::result::Result<T, String>;
 
-#[agent_definition(ephemeral)]
+#[agent_definition(mount = "/embeddings", ephemeral)]
 pub trait EmbeddingGeneratorAgent {
     fn new() -> Self;
 
@@ -29,6 +29,7 @@ pub trait EmbeddingGeneratorAgent {
     ///
     /// # Returns
     /// Tuple of (document_ids_processed, total_embeddings_generated)
+    #[endpoint(post = "/generate")]
     async fn generate_embeddings_for_all_documents(&self) -> AgentResult<(Vec<String>, u32)>;
 
     /// Get all documents that don't have embeddings yet
@@ -38,7 +39,7 @@ pub trait EmbeddingGeneratorAgent {
     async fn get_documents_without_embeddings(&self) -> AgentResult<Vec<String>>;
 }
 
-#[agent_definition(ephemeral)]
+#[agent_definition(mount = "/embeddings", ephemeral)]
 pub trait DocumentEmbeddingGeneratorAgent {
     fn new() -> Self;
 
@@ -49,6 +50,7 @@ pub trait DocumentEmbeddingGeneratorAgent {
     ///
     /// # Returns
     /// Number of embeddings generated for the document
+    #[endpoint(post = "/generate/{document_id}")]
     async fn generate_embeddings_for_document(&self, document_id: String) -> AgentResult<u32>;
 
     /// Remove all embeddings and chunks for a specific document
@@ -61,6 +63,7 @@ pub trait DocumentEmbeddingGeneratorAgent {
     async fn remove_embeddings_for_document(&self, document_id: String) -> AgentResult<()>;
 
     /// Get embedding status for a document
+    #[endpoint(get = "/status/{document_id}")]
     async fn get_embedding_status(&self, document_id: String) -> AgentResult<EmbeddingStatus>;
 }
 
