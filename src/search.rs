@@ -15,18 +15,30 @@ pub trait SearchAgent {
     #[endpoint(post = "/similar")]
     async fn find_similar_documents(
         &self,
-        request: FindSimilarDocumentsRequest,
+        document_id: String,
+        limit: Option<u64>,
     ) -> AgentResult<Vec<SearchResult>>;
 
     /// Search for documents using semantic and/or keyword search
     ///
     /// # Arguments
-    /// * `request` - Search request containing query, filters, limit, threshold, and config
+    /// * `query` - Search query string
+    /// * `filters` - Optional search filters
+    /// * `limit` - Optional limit on number of results
+    /// * `threshold` - Optional similarity threshold
+    /// * `config` - Optional hybrid search configuration
     ///
     /// # Returns
     /// List of search results with combined relevance scores
-    #[endpoint(post = "")]
-    async fn search(&self, request: SearchRequest) -> AgentResult<Vec<HybridSearchResult>>;
+    #[endpoint(post = "/")]
+    async fn search(
+        &self,
+        query: String,
+        filters: Option<SearchFilters>,
+        limit: Option<u64>,
+        threshold: Option<f32>,
+        config: Option<HybridSearchConfig>,
+    ) -> AgentResult<Vec<HybridSearchResult>>;
 }
 
 struct SearchAgentImpl;
@@ -39,17 +51,18 @@ impl SearchAgent for SearchAgentImpl {
 
     async fn find_similar_documents(
         &self,
-        request: FindSimilarDocumentsRequest,
+        document_id: String,
+        limit: Option<u64>,
     ) -> AgentResult<Vec<SearchResult>> {
-        log::info!("Finding similar documents to: {}", request.document_id);
+        log::info!("Finding similar documents to: {}", document_id);
 
         let db_helper = DatabaseHelper::from_env()
             .map_err(|e| format!("Failed to create database helper: {:?}", e))?;
 
-        let limit = request.limit.map(|l| l as usize).unwrap_or(10);
+        let limit = limit.map(|l| l as usize).unwrap_or(10);
 
         let document_embedding = self
-            .get_document_embedding(&db_helper, &request.document_id)
+            .get_document_embedding(&db_helper, &document_id)
             .await?;
         let results = self.vector_similarity_search(
             &db_helper,
@@ -61,40 +74,44 @@ impl SearchAgent for SearchAgentImpl {
         )?;
         let filtered_results: Vec<SearchResult> = results
             .into_iter()
-            .filter(|result| result.chunk.document_id != request.document_id)
+            .filter(|result| result.chunk.document_id != document_id)
             .take(limit)
             .collect();
 
         Ok(filtered_results)
     }
 
-    async fn search(&self, request: SearchRequest) -> AgentResult<Vec<HybridSearchResult>> {
-        log::info!("Performing search for query: {}", request.query);
+    async fn search(
+        &self,
+        query: String,
+        filters: Option<SearchFilters>,
+        limit: Option<u64>,
+        threshold: Option<f32>,
+        config: Option<HybridSearchConfig>,
+    ) -> AgentResult<Vec<HybridSearchResult>> {
+        log::info!("Performing search for query: {}", query);
 
         let db_helper = DatabaseHelper::from_env()
             .map_err(|e| format!("Failed to create database helper: {:?}", e))?;
 
-        let limit = request.limit.map(|l| l as usize).unwrap_or(10);
-        let threshold = request.threshold.unwrap_or(0.7);
-        let config = request.config.unwrap_or_default();
+        let limit = limit.map(|l| l as usize).unwrap_or(10);
+        let threshold = threshold.unwrap_or(0.7);
+        let config = config.unwrap_or_default();
 
         let mut semantic_results = Vec::new();
         let mut keyword_results = Vec::new();
 
         // Prepare filter conditions if provided
-        let filter_conditions = request
-            .filters
-            .as_ref()
-            .map(|f| self.build_filter_conditions(f));
+        let filter_conditions = filters.as_ref().map(|f| self.build_filter_conditions(f));
         let filter_conditions_ref = filter_conditions.as_deref();
 
         // Perform semantic search if enabled
         if config.enable_semantic {
-            let query_embedding = self.generate_query_embedding(&request.query).await?;
+            let query_embedding = self.generate_query_embedding(&query).await?;
             semantic_results = self.vector_similarity_search(
                 &db_helper,
                 &query_embedding,
-                &request.query,
+                &query,
                 limit,
                 threshold,
                 filter_conditions_ref,
@@ -103,8 +120,7 @@ impl SearchAgent for SearchAgentImpl {
 
         // Perform keyword search if enabled
         if config.enable_keyword {
-            keyword_results =
-                self.keyword_search(&db_helper, &request.query, limit, request.filters.as_ref())?;
+            keyword_results = self.keyword_search(&db_helper, &query, limit, filters.as_ref())?;
         }
 
         // Fuse results using Reciprocal Rank Fusion (RRF)

@@ -13,7 +13,8 @@ app: golem-rag-rust
 environments:
   local:
     server: local
-    componentPresets: debug
+#    componentPresets: debug
+    componentPresets: release
   cloud:
     server: cloud
     componentPresets: release
