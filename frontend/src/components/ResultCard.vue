@@ -8,15 +8,15 @@ const formatScore = (score) => (score * 100).toFixed(1) + '%';
 
 const getMatchTypeLabel = (type) => {
   switch (type) {
-    case 'semantic-only': return 'Semantic';
-    case 'keyword-only': return 'Keyword';
-    case 'both-match': return 'Hybrid';
+    case 'SemanticOnly': return 'Semantic';
+    case 'KeywordOnly': return 'Keyword';
+    case 'BothMatch': return 'Hybrid';
     default: return type;
   }
 };
 
 const highlightedExplanation = computed(() => {
-  const explanation = props.result['relevance-explanation'];
+  const explanation = props.result['relevance_explanation'];
   if (!explanation) return '';
   // Replace [keyword] with <strong>keyword</strong> for visual highlighting
   return explanation.replace(/\[(.*?)\]/g, '<strong>$1</strong>');
@@ -24,12 +24,12 @@ const highlightedExplanation = computed(() => {
 </script>
 
 <template>
-  <div class="result-card glass animate-fade-in" @click="emit('preview', result.chunk['document-id'])">
+  <div class="result-card glass animate-fade-in" @click="emit('preview', result.chunk['document_id'])">
     <div class="result-header">
-      <span class="tag" :class="result['match-type'].toLowerCase()">
-        {{ getMatchTypeLabel(result['match-type']) }}
+      <span class="tag" :class="result['match_type'].toLowerCase()">
+        {{ getMatchTypeLabel(result['match_type']) }}
       </span>
-      <span class="score">Score: {{ formatScore(result['combined-score']) }}</span>
+      <span class="score">Score: {{ formatScore(result['combined_score']) }}</span>
     </div>
     
     <div class="result-content">
@@ -42,7 +42,7 @@ const highlightedExplanation = computed(() => {
     </div>
 
     <div class="result-footer">
-      <span class="doc-id">Document: {{ result.chunk['document-id'] }}</span>
+      <span class="doc-id">Document: {{ result.chunk['document_id'] }}</span>
     </div>
   </div>
 </template>

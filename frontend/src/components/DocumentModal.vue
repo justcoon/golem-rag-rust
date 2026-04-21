@@ -39,15 +39,15 @@ const formatDate = (dateStr) => {
           </div>
           <div class="meta-item">
             <span class="label">Content Type:</span>
-            <span class="value">{{ document.metadata?.['content-type'] }}</span>
+            <span class="value">{{ document.metadata?.['content_type'] }}</span>
           </div>
           <div class="meta-item">
             <span class="label">Size:</span>
-            <span class="value">{{ (document['size-bytes'] / 1024).toFixed(1) }} KB</span>
+            <span class="value">{{ (document['size_bytes'] / 1024).toFixed(1) }} KB</span>
           </div>
           <div class="meta-item">
             <span class="label">Updated:</span>
-            <span class="value">{{ formatDate(document['updated-at']) }}</span>
+            <span class="value">{{ formatDate(document['updated_at']) }}</span>
           </div>
           <div class="meta-item tags">
             <span class="label">Tags:</span>

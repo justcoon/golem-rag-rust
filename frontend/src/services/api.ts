@@ -18,17 +18,17 @@ export const ApiService = {
           limit,
           threshold,
           config: config ? {
-            'semantic-weight': config.semantic_weight,
-            'keyword-weight': config.keyword_weight,
-            'enable-semantic': config.enable_semantic,
-            'enable-keyword': config.enable_keyword,
-            'rrf-k': config.rrf_k
+            'semantic_weight': config.semantic_weight,
+            'keyword_weight': config.keyword_weight,
+            'enable_semantic': config.enable_semantic,
+            'enable_keyword': config.enable_keyword,
+            'rrf_k': config.rrf_k
           } : {
-            'semantic-weight': 0.7,
-            'keyword-weight': 0.3,
-            'enable-semantic': true,
-            'enable-keyword': true,
-            'rrf-k': 60.0
+            'semantic_weight': 0.7,
+            'keyword_weight': 0.3,
+            'enable_semantic': true,
+            'enable_keyword': true,
+            'rrf_k': 60.0
           }
         }),
       });
@@ -38,8 +38,6 @@ export const ApiService = {
       }
 
       const data = await response.json();
-      if (data.ok) return data.ok;
-      if (data.err) throw new Error(data.err.error || 'Failed to search');
       return data;
     } catch (error) {
       console.error('Hybrid search failed:', error);
@@ -54,8 +52,6 @@ export const ApiService = {
         throw new Error(`API error: ${response.statusText}`);
       }
       const data = await response.json();
-      if (data.ok) return data.ok;
-      if (data.err) throw new Error(data.err.error || 'Failed to load document');
       return data;
     } catch (error) {
       console.error('Failed to fetch document:', error);
@@ -70,14 +66,12 @@ export const ApiService = {
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ 'document-id': documentId, limit }),
+        body: JSON.stringify({ 'document_id': documentId, limit }),
       });
       if (!response.ok) {
         throw new Error(`API error: ${response.statusText}`);
       }
       const data = await response.json();
-      if (data.ok) return data.ok;
-      if (data.err) throw new Error(data.err.error || 'Failed to find similar documents');
       return data;
     } catch (error) {
       console.error('Failed to find similar documents:', error);
