@@ -267,3 +267,22 @@ pub enum MatchType {
     KeywordOnly,  // Only keyword match
     BothMatch,    // Both semantic and keyword match
 }
+
+#[derive(Schema, Clone, Serialize, Deserialize)]
+pub struct ErrorResponse {
+    pub message: String,
+}
+
+impl From<String> for ErrorResponse {
+    fn from(message: String) -> Self {
+        ErrorResponse { message }
+    }
+}
+
+impl From<&str> for ErrorResponse {
+    fn from(message: &str) -> Self {
+        ErrorResponse {
+            message: message.to_string(),
+        }
+    }
+}

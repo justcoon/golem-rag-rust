@@ -7,7 +7,7 @@ use futures::future;
 use golem_rust::{agent_definition, agent_implementation, endpoint};
 use std::string::String;
 
-pub type AgentResult<T> = std::result::Result<T, String>;
+pub type AgentResult<T> = std::result::Result<T, ErrorResponse>;
 
 #[agent_definition(mount = "/embeddings", ephemeral)]
 pub trait EmbeddingGeneratorAgent {
@@ -102,7 +102,7 @@ impl EmbeddingGeneratorAgent for EmbeddingGeneratorAgentImpl {
                     Some(count)
                 }
                 Err(e) => {
-                    log::error!("Failed to process document {}: {:?}", document_id, e);
+                    log::error!("Failed to process document {}: {}", document_id, e.message);
                     None
                 }
             }
@@ -154,8 +154,9 @@ impl EmbeddingGeneratorAgent for EmbeddingGeneratorAgentImpl {
 
     async fn get_documents_without_embeddings(&self) -> AgentResult<Vec<String>> {
         log::info!("Finding all documents without embeddings");
-        let db_helper = DatabaseHelper::from_env()
-            .map_err(|e| format!("Failed to create database helper: {:?}", e))?;
+        let db_helper = DatabaseHelper::from_env().map_err(|e| {
+            ErrorResponse::from(format!("Failed to create database helper: {:?}", e))
+        })?;
 
         // Query for documents that don't have embeddings or have failed embeddings
         let query = r#"
@@ -226,7 +227,7 @@ impl DocumentEmbeddingGeneratorAgent for DocumentEmbeddingGeneratorAgentImpl {
                 "Embeddings are already in progress for document: {}, skipping",
                 document_id
             );
-            return Err("Embeddings are already in progress".to_string());
+            return Err("Embeddings are already in progress".into());
         }
 
         // Load document
@@ -264,7 +265,7 @@ impl DocumentEmbeddingGeneratorAgent for DocumentEmbeddingGeneratorAgentImpl {
         let db_helper = self.create_db_helper()?;
         db_helper
             .get_embedding_status(&document_id)
-            .map_err(|e| format!("Failed to get embedding status: {:?}", e))
+            .map_err(|e| ErrorResponse::from(format!("Failed to get embedding status: {:?}", e)))
     }
 
     async fn remove_embeddings_for_document(&self, document_id: String) -> AgentResult<()> {
@@ -439,7 +440,8 @@ impl DocumentEmbeddingGeneratorAgentImpl {
     }
 
     fn create_db_helper(&self) -> AgentResult<DatabaseHelper> {
-        DatabaseHelper::from_env().map_err(|e| format!("Failed to create database helper: {:?}", e))
+        DatabaseHelper::from_env()
+            .map_err(|e| ErrorResponse::from(format!("Failed to create database helper: {:?}", e)))
     }
 
     fn load_document(
@@ -449,8 +451,8 @@ impl DocumentEmbeddingGeneratorAgentImpl {
     ) -> AgentResult<Document> {
         db_helper
             .load_document(document_id)
-            .map_err(|e| format!("Failed to load document: {:?}", e))?
-            .ok_or_else(|| format!("Document not found: {}", document_id))
+            .map_err(|e| ErrorResponse::from(format!("Failed to load document: {:?}", e)))?
+            .ok_or_else(|| ErrorResponse::from(format!("Document not found: {}", document_id)))
     }
 
     fn mark_status(
@@ -461,7 +463,7 @@ impl DocumentEmbeddingGeneratorAgentImpl {
     ) -> AgentResult<()> {
         db_helper
             .update_embedding_status(document_id, status)
-            .map_err(|e| format!("Failed to update embedding status: {:?}", e))
+            .map_err(|e| ErrorResponse::from(format!("Failed to update embedding status: {:?}", e)))
     }
 
     async fn process_document(
@@ -483,9 +485,9 @@ impl DocumentEmbeddingGeneratorAgentImpl {
                 Ok(_) => embedding_count += 1,
                 Err(e) => {
                     log::error!(
-                        "Failed to generate embedding for chunk {}: {:?}",
+                        "Failed to generate embedding for chunk {}: {}",
                         chunk_index,
-                        e
+                        e.message
                     );
                     // Continue with other chunks
                 }

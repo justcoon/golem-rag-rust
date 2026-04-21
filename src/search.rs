@@ -5,7 +5,7 @@ use crate::models::*;
 use golem_rust::{agent_definition, agent_implementation, endpoint};
 use std::string::String;
 
-pub type AgentResult<T> = std::result::Result<T, String>;
+pub type AgentResult<T> = std::result::Result<T, ErrorResponse>;
 
 #[agent_definition(mount = "/search", ephemeral)]
 pub trait SearchAgent {
@@ -133,10 +133,10 @@ impl SearchAgent for SearchAgentImpl {
 impl SearchAgentImpl {
     async fn generate_query_embedding(&self, query: &str) -> AgentResult<Vec<f32>> {
         let embedding_client = EmbeddingClient::from_env().map_err(|e| {
-            format!(
+            ErrorResponse::from(format!(
                 "Failed to create embedding client from environment: {:?}",
                 e
-            )
+            ))
         })?;
 
         match embedding_client
@@ -149,7 +149,7 @@ impl SearchAgentImpl {
                     "Failed to generate query embedding even with fallback: {:?}",
                     e
                 );
-                Err(format!("Failed to generate query embedding: {:?}", e))
+                Err(format!("Failed to generate query embedding: {:?}", e).into())
             }
         }
     }
@@ -223,15 +223,17 @@ impl SearchAgentImpl {
         let result = db_helper
             .connection
             .query(query, encode_params![document_id])
-            .map_err(|e| format!("Failed to get document embedding: {:?}", e))?;
+            .map_err(|e| {
+                ErrorResponse::from(format!("Failed to get document embedding: {:?}", e))
+            })?;
 
         use crate::common_lib::database::decode::{DbResultDecoder, Single};
         Single::<Vec<f32>>::decode_result(result)
-            .map_err(|e| format!("Failed to decode embedding: {:?}", e))?
+            .map_err(|e| ErrorResponse::from(format!("Failed to decode embedding: {:?}", e)))?
             .into_iter()
             .next()
             .map(|s| s.0)
-            .ok_or_else(|| "Document embedding not found".to_string())
+            .ok_or_else(|| ErrorResponse::from("Document embedding not found"))
     }
 
     fn build_filter_conditions(&self, filters: &SearchFilters) -> String {

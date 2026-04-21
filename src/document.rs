@@ -5,7 +5,7 @@ use crate::models::*;
 use golem_rust::{agent_definition, agent_implementation, endpoint};
 use std::string::String;
 
-pub type AgentResult<T> = std::result::Result<T, String>;
+pub type AgentResult<T> = std::result::Result<T, ErrorResponse>;
 
 #[agent_definition(mount = "/documents", ephemeral)]
 pub trait DocumentAgent {
@@ -77,7 +77,7 @@ impl DocumentAgent for DocumentAgentImpl {
 
         db_helper
             .load_document(&document_id)
-            .map_err(|e| format!("Failed to load document: {:?}", e))
+            .map_err(|e| ErrorResponse::from(format!("Failed to load document: {:?}", e)))
     }
 
     fn get_document_metadata(&self, document_id: String) -> AgentResult<Option<DocumentMetadata>> {
@@ -100,10 +100,13 @@ impl DocumentAgent for DocumentAgentImpl {
         let result = db_helper
             .connection
             .query(&sql_query, params)
-            .map_err(|e| format!("Failed to execute document list query: {:?}", e))?;
+            .map_err(|e| {
+                ErrorResponse::from(format!("Failed to execute document list query: {:?}", e))
+            })?;
 
         use crate::common_lib::database::decode::DbResultDecoder;
-        Document::decode_result(result).map_err(|e| format!("Failed to decode documents: {:?}", e))
+        Document::decode_result(result)
+            .map_err(|e| ErrorResponse::from(format!("Failed to decode documents: {:?}", e)))
     }
 
     fn get_document_chunks(&self, document_id: String) -> AgentResult<Vec<DocumentChunk>> {
@@ -124,16 +127,16 @@ impl DocumentAgent for DocumentAgentImpl {
 
         use crate::common_lib::database::decode::DbResultDecoder;
         DocumentChunk::decode_result(result)
-            .map_err(|e| format!("Failed to decode document chunks: {:?}", e))
+            .map_err(|e| ErrorResponse::from(format!("Failed to decode document chunks: {:?}", e)))
     }
 
     fn document_exists(&self, document_id: String) -> AgentResult<bool> {
         let db_helper = DatabaseHelper::from_env()
             .map_err(|e| format!("Failed to create database helper: {:?}", e))?;
 
-        db_helper
-            .document_exists(&document_id)
-            .map_err(|e| format!("Failed to check document existence: {:?}", e))
+        db_helper.document_exists(&document_id).map_err(|e| {
+            ErrorResponse::from(format!("Failed to check document existence: {:?}", e))
+        })
     }
 }
 

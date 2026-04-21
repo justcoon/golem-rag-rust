@@ -10,7 +10,7 @@ use golem_rust::{agent_definition, agent_implementation, endpoint};
 use std::string::String;
 use uuid::Uuid;
 
-pub type AgentResult<T> = std::result::Result<T, String>;
+pub type AgentResult<T> = std::result::Result<T, ErrorResponse>;
 
 #[agent_definition(mount = "/s3")]
 pub trait S3DocumentLoaderAgent {
@@ -63,7 +63,7 @@ impl S3DocumentLoaderAgent for S3DocumentLoaderAgentImpl {
         // Step 1: List documents in S3 using prefix directly
         let s3_documents = self
             .list_s3_documents(&bucket, prefix.as_deref())
-            .map_err(|e| format!("Failed to list S3 documents: {:?}", e))?;
+            .map_err(|e| format!("Failed to list S3 documents: {}", e.message))?;
 
         // Step 2: Process each document
         let mut loaded_document_ids = Vec::new();
