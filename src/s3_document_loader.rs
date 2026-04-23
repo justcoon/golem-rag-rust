@@ -24,11 +24,11 @@ pub trait S3DocumentLoaderAgent {
     ///
     /// # Returns
     /// List of document IDs that were successfully loaded
-    #[endpoint(post = "/load/{bucket}")]
+    #[endpoint(post = "/buckets/{bucket}/load")]
     fn load_documents(&self, bucket: String, prefix: Option<String>) -> AgentResult<Vec<String>>;
 
     /// List available S3 documents for a bucket with optional prefix
-    #[endpoint(post = "/list/{bucket}")]
+    #[endpoint(post = "/buckets/{bucket}/list")]
     fn list_documents(
         &self,
         bucket: String,

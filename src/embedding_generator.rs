@@ -36,6 +36,7 @@ pub trait EmbeddingGeneratorAgent {
     ///
     /// # Returns
     /// Vector of document IDs that don't have embeddings
+    #[endpoint(get = "/without")]
     async fn get_documents_without_embeddings(&self) -> AgentResult<Vec<String>>;
 }
 
@@ -50,7 +51,7 @@ pub trait DocumentEmbeddingGeneratorAgent {
     ///
     /// # Returns
     /// Number of embeddings generated for the document
-    #[endpoint(post = "/generate/{document_id}")]
+    #[endpoint(post = "/{document_id}/generate")]
     async fn generate_embeddings_for_document(&self, document_id: String) -> AgentResult<u32>;
 
     /// Remove all embeddings and chunks for a specific document
@@ -60,10 +61,11 @@ pub trait DocumentEmbeddingGeneratorAgent {
     ///
     /// # Returns
     /// Ok(()) if successful, error message if failed
+    #[endpoint(delete = "/{document_id}")]
     async fn remove_embeddings_for_document(&self, document_id: String) -> AgentResult<()>;
 
     /// Get embedding status for a document
-    #[endpoint(get = "/status/{document_id}")]
+    #[endpoint(get = "/{document_id}/status")]
     async fn get_embedding_status(&self, document_id: String) -> AgentResult<EmbeddingStatus>;
 }
 

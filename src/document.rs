@@ -28,6 +28,7 @@ pub trait DocumentAgent {
     ///
     /// # Returns
     /// DocumentMetadata, or None if not found
+    #[endpoint(get = "/{document_id}/metadata")]
     fn get_document_metadata(&self, document_id: String) -> AgentResult<Option<DocumentMetadata>>;
 
     /// List documents with optional filtering
@@ -38,6 +39,7 @@ pub trait DocumentAgent {
     ///
     /// # Returns
     /// List of documents matching criteria
+    #[endpoint(post = "/")]
     fn list_documents(
         &self,
         filters: Option<DocumentFilters>,

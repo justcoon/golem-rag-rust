@@ -329,24 +329,55 @@ POST /search/similar
 # Get document
 GET /documents/{document_id}
 
-# Generate embeddings
-POST /embeddings/generate/{document_id}
+# Get document metadata
+GET /documents/{document_id}/metadata
 
-# Check embedding status
-GET /embeddings/status/{document_id}
+# List documents with filters
+POST /documents
+{
+  "filters": {
+    "tags": ["tag1", "tag2"],
+    "sources": ["source1"],
+    "content_types": ["Text", "Markdown"],
+    "date_range": {
+      "start": "2024-01-01",
+      "end": "2024-12-31"
+    }
+  },
+  "limit": 10
+}
+```
+
+### Embedding Management
+
+```bash
+# Generate embeddings for a specific document
+POST /embeddings/{document_id}/generate
+
+# Generate embeddings for multiple documents (batch)
+POST /embeddings/generate
+
+# Check embedding status for a document
+GET /embeddings/{document_id}/status
+
+# List documents without embeddings
+GET /embeddings/without
+
+# Remove embeddings for a document
+DELETE /embeddings/{document_id}
 ```
 
 ### S3 Document Management
 
 ```bash
 # Load documents from S3 bucket with optional prefix
-POST /s3/load/{bucket}
+POST /s3/buckets/{bucket}/load
 {
   "prefix": "general/"  // optional
 }
 
 # List documents in S3 bucket with optional prefix
-POST /s3/list/{bucket}
+POST /s3/buckets/{bucket}/list
 {
   "prefix": "general/"  // optional
 }
@@ -360,7 +391,7 @@ POST /s3/sync
 
 **Example: Load from golem-documents bucket with legal prefix**
 ```bash
-POST /s3/load/golem-documents
+POST /s3/buckets/golem-documents/load
 {
   "prefix": "general/"
 }
@@ -369,6 +400,40 @@ POST /s3/load/golem-documents
 **Example: Synchronize all buckets**
 ```bash
 POST /s3/sync
+```
+
+### API Specification
+
+```bash
+# Get OpenAPI specification (JSON)
+GET /openapi.json
+
+# Get OpenAPI specification (YAML)
+GET /openapi.yaml
+```
+
+### Webhook Endpoints
+
+The system provides webhook endpoints for async operation callbacks:
+
+```bash
+# Document agent webhook
+POST /webhooks/document-agent/{promise-id}
+
+# Document embedding generator agent webhook
+POST /webhooks/document-embedding-generator-agent/{promise-id}
+
+# Embedding generator agent webhook
+POST /webhooks/embedding-generator-agent/{promise-id}
+
+# S3 document loader agent webhook
+POST /webhooks/s3-document-loader-agent/{promise-id}
+
+# S3 document sync agent webhook
+POST /webhooks/s3-document-sync-agent/{promise-id}
+
+# Search agent webhook
+POST /webhooks/search-agent/{promise-id}
 ```
 
 ## Hybrid Search Configuration
