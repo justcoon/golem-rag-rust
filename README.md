@@ -1,6 +1,6 @@
 # Golem RAG System (Rust Implementation)
 
-A comprehensive Retrieval-Augmented Generation (RAG) system built on Golem Cloud v1.4.2, featuring hybrid search capabilities, document management, and embedding generation.
+A comprehensive Retrieval-Augmented Generation (RAG) system built on Golem Cloud v1.5.0, featuring hybrid search capabilities, document management, and embedding generation.
 
 ## Features
 
@@ -191,13 +191,11 @@ Load documents from S3-compatible storage using flexible prefix-based filtering:
 ```bash
 # With prefix
 golem agent invoke 's3-document-loader-agent()' \
-  'golem-rust:rag/s3-document-loader-agent.{load-documents}' \
-  '"golem-documents"' '"general/"'
+  load_documents '"golem-documents"' '"general/"'
 
 # Without prefix (load all documents)
 golem agent invoke 's3-document-loader-agent()' \
-  'golem-rust:rag/s3-document-loader-agent.{load-documents}' \
-  '"golem-documents"' '""'
+  load_documents '"golem-documents"' '""'
 ```
 
 **Features:**
@@ -231,37 +229,33 @@ curl -X POST http://localhost:9006/search \
 ```bash
 # Generate embeddings for a specific document
 golem agent invoke 'document-embedding-generator-agent()' \
-  'golem-rust:rag/document-embedding-generator-agent.{generate-embeddings-for-document}' \
-  '"doc_123"'
+  generate_embeddings_for_document '"doc_123"'
 
 # Remove embeddings for a document
 golem agent invoke 'document-embedding-generator-agent()' \
-  'golem-rust:rag/document-embedding-generator-agent.{remove-embeddings-for-document}' \
-  '"doc_123"'
+  remove_embeddings_for_document '"doc_123"'
 
 # Get embedding status for a document
 golem agent invoke 'document-embedding-generator-agent()' \
-  'golem-rust:rag/document-embedding-generator-agent.{get-embedding-status}' \
-  '"doc_123"'
+  get_embedding_status '"doc_123"'
 ```
 
 #### EmbeddingGeneratorAgent
 ```bash
 # Generate embeddings for multiple documents
 golem agent invoke 'embedding-generator-agent()' \
-  'golem-rust:rag/embedding-generator-agent.{generate-embeddings-for-documents}' \
-  '["doc_123", "doc_456", "doc_789"]'
+  generate_embeddings_for_documents '["doc_123", "doc_456", "doc_789"]'
 
 # Generate embeddings for all documents without embeddings
 golem agent invoke 'embedding-generator-agent()' \
-  'golem-rust:rag/embedding-generator-agent.{generate-embeddings-for-all-documents}'
+  generate_embeddings_for_all_documents
 ```
 
 #### S3DocumentSyncAgent
 ```bash
 # Synchronize all buckets (load documents and generate embeddings)
 golem agent invoke 's3-document-sync-agent()' \
-  'golem-rust:rag/s3-document-sync-agent.{sync-all}'
+  sync_all
 ```
 
 ## API Endpoints
