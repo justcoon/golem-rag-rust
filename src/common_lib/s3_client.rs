@@ -463,10 +463,10 @@ impl S3Client {
         let mut next_token = None;
 
         // Extract NextContinuationToken if present
-        if let Some(start) = body.find("<NextContinuationToken>") {
-            if let Some(end) = body[start..].find("</NextContinuationToken>") {
-                next_token = Some(body[start + 23..start + end].to_string());
-            }
+        if let Some(start) = body.find("<NextContinuationToken>")
+            && let Some(end) = body[start..].find("</NextContinuationToken>")
+        {
+            next_token = Some(body[start + 23..start + end].to_string());
         }
 
         // Split body into <Contents> blocks
