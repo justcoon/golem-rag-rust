@@ -58,8 +58,6 @@ s3_loader --> postgres : "Store Documents"
 
 s3_sync --> s3_loader : "RPC\nLoad from all buckets"
 s3_sync --> embedding_gen : "RPC\nGenerate embeddings"
-s3_sync --> sync_state : "Maintain\nSync History"
-s3_sync --> scheduler : "Schedule\nManagement"
 
 ' Database connections
 postgres --> postgres : "Store:\n- Documents\n- Document Chunks\n- Embeddings"

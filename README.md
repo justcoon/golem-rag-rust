@@ -270,9 +270,6 @@ golem agent invoke 'S3DocumentSyncAgent()' set_sync_schedule 60 false
 # Get current sync schedule
 golem agent invoke 'S3DocumentSyncAgent()' get_sync_schedule
 
-# Execute scheduled sync if due
-golem agent invoke 'S3DocumentSyncAgent()' execute_scheduled_sync
-
 # Delete sync schedule
 golem agent invoke 'S3DocumentSyncAgent()' delete_sync_schedule
 
@@ -413,9 +410,6 @@ POST /s3/sync/schedule
 
 # Get sync schedule
 GET /s3/sync/schedule
-
-# Execute scheduled sync if due
-POST /s3/sync/execute-scheduled
 
 # Delete sync schedule
 DELETE /s3/sync/schedule
