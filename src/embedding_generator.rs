@@ -4,7 +4,7 @@ use crate::database_helper::DatabaseHelperRagext;
 use crate::models::*;
 use chrono::Utc;
 use futures::future;
-use golem_rust::{agent_definition, agent_implementation, endpoint};
+use golem_rust::{agent_definition, agent_implementation, description, endpoint, prompt};
 use std::string::String;
 
 pub type AgentResult<T> = std::result::Result<T, ErrorResponse>;
@@ -20,6 +20,10 @@ pub trait EmbeddingGeneratorAgent {
     ///
     /// # Returns
     /// Total number of embeddings generated across all documents
+    #[prompt("Generate embeddings for multiple documents")]
+    #[description(
+        "Generates vector embeddings for the specified list of document IDs. Processes documents in parallel for efficiency."
+    )]
     async fn generate_embeddings_for_documents(
         &self,
         document_ids: Vec<String>,
@@ -29,6 +33,10 @@ pub trait EmbeddingGeneratorAgent {
     ///
     /// # Returns
     /// Tuple of (document_ids_processed, total_embeddings_generated)
+    #[prompt("Generate embeddings for all documents without embeddings")]
+    #[description(
+        "Finds all documents that don't have embeddings yet and generates embeddings for them. Returns the list of processed document IDs and total count of embeddings generated."
+    )]
     #[endpoint(post = "/generate")]
     async fn generate_embeddings_for_all_documents(&self) -> AgentResult<(Vec<String>, u32)>;
 
@@ -36,6 +44,10 @@ pub trait EmbeddingGeneratorAgent {
     ///
     /// # Returns
     /// Vector of document IDs that don't have embeddings
+    #[prompt("Find documents without embeddings")]
+    #[description(
+        "Returns a list of all document IDs that currently don't have embeddings or have failed embedding generation."
+    )]
     #[endpoint(get = "/without")]
     async fn get_documents_without_embeddings(&self) -> AgentResult<Vec<String>>;
 }
@@ -51,6 +63,10 @@ pub trait DocumentEmbeddingGeneratorAgent {
     ///
     /// # Returns
     /// Number of embeddings generated for the document
+    #[prompt("Generate embeddings for a specific document")]
+    #[description(
+        "Generates and stores vector embeddings for a single document. Splits document into chunks, generates embeddings for each chunk, and stores them in the database."
+    )]
     #[endpoint(post = "/{document_id}/generate")]
     async fn generate_embeddings_for_document(&self, document_id: String) -> AgentResult<u32>;
 
@@ -61,10 +77,18 @@ pub trait DocumentEmbeddingGeneratorAgent {
     ///
     /// # Returns
     /// Ok(()) if successful, error message if failed
+    #[prompt("Remove embeddings for a document")]
+    #[description(
+        "Deletes all embeddings and chunks associated with the specified document ID. Resets the document's embedding status to not processed."
+    )]
     #[endpoint(delete = "/{document_id}")]
     async fn remove_embeddings_for_document(&self, document_id: String) -> AgentResult<()>;
 
     /// Get embedding status for a document
+    #[prompt("Check embedding status for a document")]
+    #[description(
+        "Returns the current embedding generation status for the specified document, including whether it's completed, in progress, failed, or not processed."
+    )]
     #[endpoint(get = "/{document_id}/status")]
     async fn get_embedding_status(&self, document_id: String) -> AgentResult<EmbeddingStatus>;
 }
@@ -89,7 +113,6 @@ impl EmbeddingGeneratorAgent for EmbeddingGeneratorAgentImpl {
         // Process all documents in parallel using join_all
         let futures = document_ids.into_iter().map(|document_id| async move {
             // Create a separate document embedding generator for each document
-            // let doc_generator = DocumentEmbeddingGeneratorAgentClient::get();
             let doc_generator = DocumentEmbeddingGeneratorAgentClient::new_phantom();
             match doc_generator
                 .generate_embeddings_for_document(document_id.clone())

@@ -6,7 +6,7 @@ use crate::encode_params;
 use crate::models::*;
 use chrono::DateTime;
 
-use golem_rust::{agent_definition, agent_implementation, endpoint};
+use golem_rust::{agent_definition, agent_implementation, description, endpoint, prompt};
 use std::string::String;
 use uuid::Uuid;
 
@@ -24,10 +24,18 @@ pub trait S3DocumentLoaderAgent {
     ///
     /// # Returns
     /// List of document IDs that were successfully loaded
+    #[prompt("Load documents from an S3 bucket")]
+    #[description(
+        "Loads documents from the specified S3 bucket, optionally filtered by prefix. Handles change detection and updates existing documents if they have been modified."
+    )]
     #[endpoint(post = "/buckets/{bucket}/load")]
     fn load_documents(&self, bucket: String, prefix: Option<String>) -> AgentResult<Vec<String>>;
 
     /// List available S3 documents for a bucket with optional prefix
+    #[prompt("List documents in an S3 bucket")]
+    #[description(
+        "Lists all available documents in the specified S3 bucket, optionally filtered by prefix. Returns document metadata including size, last modified time, and content type."
+    )]
     #[endpoint(post = "/buckets/{bucket}/list")]
     fn list_documents(
         &self,
@@ -36,6 +44,10 @@ pub trait S3DocumentLoaderAgent {
     ) -> AgentResult<Vec<S3DocumentSource>>;
 
     /// List all available S3 buckets
+    #[prompt("List all S3 buckets")]
+    #[description(
+        "Returns a list of all S3 buckets that are accessible with the current configuration."
+    )]
     #[endpoint(get = "/buckets")]
     fn list_buckets(&self) -> AgentResult<Vec<String>>;
 }

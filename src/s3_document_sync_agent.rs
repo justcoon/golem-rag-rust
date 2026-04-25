@@ -2,7 +2,7 @@ use crate::embedding_generator::EmbeddingGeneratorAgentClient;
 use crate::models::ErrorResponse;
 use crate::s3_document_loader::S3DocumentLoaderAgentClient;
 use futures::future;
-use golem_rust::{Schema, agent_definition, agent_implementation, endpoint};
+use golem_rust::{Schema, agent_definition, agent_implementation, description, endpoint, prompt};
 use serde::{Deserialize, Serialize};
 use std::string::String;
 
@@ -34,6 +34,10 @@ pub trait S3DocumentSyncAgent {
     ///
     /// # Returns
     /// SyncResult with statistics about the sync operation
+    #[prompt("Sync all S3 buckets")]
+    #[description(
+        "Synchronizes all accessible S3 buckets by loading new/modified documents and generating embeddings. Processes all buckets in parallel for efficiency."
+    )]
     #[endpoint(post = "/sync")]
     async fn sync_all(&self) -> AgentResult<SyncResult>;
 }

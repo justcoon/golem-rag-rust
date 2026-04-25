@@ -2,7 +2,7 @@ use crate::common_lib::database::{DatabaseHelper, DbValueEncoder, PostgresDbValu
 use crate::database_helper::DatabaseHelperRagext;
 use crate::encode_params;
 use crate::models::*;
-use golem_rust::{agent_definition, agent_implementation, endpoint};
+use golem_rust::{agent_definition, agent_implementation, description, endpoint, prompt};
 use std::string::String;
 
 pub type AgentResult<T> = std::result::Result<T, ErrorResponse>;
@@ -18,6 +18,10 @@ pub trait DocumentAgent {
     ///
     /// # Returns
     /// Complete Document with metadata, or None if not found
+    #[prompt("Get a document by ID")]
+    #[description(
+        "Retrieves a complete document with all metadata by its unique ID. Returns None if document doesn't exist."
+    )]
     #[endpoint(get = "/{document_id}")]
     fn get_document(&self, document_id: String) -> AgentResult<Option<Document>>;
 
@@ -28,6 +32,10 @@ pub trait DocumentAgent {
     ///
     /// # Returns
     /// DocumentMetadata, or None if not found
+    #[prompt("Get document metadata")]
+    #[description(
+        "Retrieves only the metadata for a document without the full content. Returns None if document doesn't exist."
+    )]
     #[endpoint(get = "/{document_id}/metadata")]
     fn get_document_metadata(&self, document_id: String) -> AgentResult<Option<DocumentMetadata>>;
 
@@ -39,6 +47,10 @@ pub trait DocumentAgent {
     ///
     /// # Returns
     /// List of documents matching criteria
+    #[prompt("List documents with filtering")]
+    #[description(
+        "Lists documents with optional filtering by content types, tags, sources, date ranges, and namespaces. Returns most recent documents first."
+    )]
     #[endpoint(post = "/")]
     fn list_documents(
         &self,
@@ -53,6 +65,10 @@ pub trait DocumentAgent {
     ///
     /// # Returns
     /// List of document chunks with embeddings
+    #[prompt("Get document chunks")]
+    #[description(
+        "Retrieves all text chunks for a document that were created during embedding generation. Chunks are ordered by their position in the original document."
+    )]
     fn get_document_chunks(&self, document_id: String) -> AgentResult<Vec<DocumentChunk>>;
 
     /// Check if document exists
@@ -62,6 +78,10 @@ pub trait DocumentAgent {
     ///
     /// # Returns
     /// True if document exists, false otherwise
+    #[prompt("Check if document exists")]
+    #[description(
+        "Checks if a document with the specified ID exists in the system. Returns true if found, false otherwise."
+    )]
     fn document_exists(&self, document_id: String) -> AgentResult<bool>;
 }
 

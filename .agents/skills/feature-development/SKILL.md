@@ -1,3 +1,8 @@
+---
+name: feature-development
+description: "Comprehensive skill for implementing new features in the Golem RAG System, following a structured 3-phase workflow with planning, confirmation, and quality gates."
+---
+
 # Feature Development Skill
 
 ## Description

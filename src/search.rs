@@ -2,7 +2,7 @@ use crate::common_lib::database::DatabaseHelper;
 use crate::common_lib::embedding_client::EmbeddingClient;
 use crate::encode_params;
 use crate::models::*;
-use golem_rust::{agent_definition, agent_implementation, endpoint};
+use golem_rust::{agent_definition, agent_implementation, description, endpoint, prompt};
 use std::string::String;
 
 pub type AgentResult<T> = std::result::Result<T, ErrorResponse>;
@@ -12,6 +12,10 @@ pub trait SearchAgent {
     fn new() -> Self;
 
     /// Get similar documents to a specific document
+    #[prompt("Find similar documents")]
+    #[description(
+        "Finds documents that are semantically similar to the specified document using vector similarity search."
+    )]
     #[endpoint(post = "/similar")]
     async fn find_similar_documents(
         &self,
@@ -30,6 +34,10 @@ pub trait SearchAgent {
     ///
     /// # Returns
     /// List of search results with combined relevance scores
+    #[prompt("Search documents")]
+    #[description(
+        "Performs hybrid search combining semantic (vector) and keyword search. Supports filtering by content type, tags, sources, and date ranges. Returns ranked results with relevance scores."
+    )]
     #[endpoint(post = "/")]
     async fn search(
         &self,
