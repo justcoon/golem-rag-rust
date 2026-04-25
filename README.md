@@ -1,6 +1,6 @@
 # Golem RAG System (Rust Implementation)
 
-A comprehensive Retrieval-Augmented Generation (RAG) system built on Golem Cloud v1.4.2, featuring hybrid search capabilities, document management, and embedding generation.
+A comprehensive Retrieval-Augmented Generation (RAG) system built on Golem Cloud v1.5.0, featuring hybrid search capabilities, document management, and embedding generation.
 
 ## Features
 
@@ -139,9 +139,9 @@ The system consists of 6 core agents running on Golem Cloud, coordinated through
 
 ### Prerequisites
 
-- Rust with `wasm32-wasip1` target: `rustup target add wasm32-wasip1`
+- Rust with `wasm32-wasip2` target: `rustup target add wasm32-wasip2`
 - `cargo-component` version 0.21.1: `cargo install --force cargo-component@0.21.1`
-- Golem CLI (`golem`) v1.4.2: download from https://github.com/golemcloud/golem/releases
+- Golem CLI (`golem`) v1.5.0: download from https://github.com/golemcloud/golem/releases
 - Docker and Docker Compose
 - S3 buckets (optional, for document loading)
 
@@ -191,13 +191,11 @@ Load documents from S3-compatible storage using flexible prefix-based filtering:
 ```bash
 # With prefix
 golem agent invoke 's3-document-loader-agent()' \
-  'golem-rust:rag/s3-document-loader-agent.{load-documents}' \
-  '"golem-documents"' '"general/"'
+  load_documents '"golem-documents"' '"general/"'
 
 # Without prefix (load all documents)
 golem agent invoke 's3-document-loader-agent()' \
-  'golem-rust:rag/s3-document-loader-agent.{load-documents}' \
-  '"golem-documents"' '""'
+  load_documents '"golem-documents"' '""'
 ```
 
 **Features:**
@@ -231,37 +229,33 @@ curl -X POST http://localhost:9006/search \
 ```bash
 # Generate embeddings for a specific document
 golem agent invoke 'document-embedding-generator-agent()' \
-  'golem-rust:rag/document-embedding-generator-agent.{generate-embeddings-for-document}' \
-  '"doc_123"'
+  generate_embeddings_for_document '"doc_123"'
 
 # Remove embeddings for a document
 golem agent invoke 'document-embedding-generator-agent()' \
-  'golem-rust:rag/document-embedding-generator-agent.{remove-embeddings-for-document}' \
-  '"doc_123"'
+  remove_embeddings_for_document '"doc_123"'
 
 # Get embedding status for a document
 golem agent invoke 'document-embedding-generator-agent()' \
-  'golem-rust:rag/document-embedding-generator-agent.{get-embedding-status}' \
-  '"doc_123"'
+  get_embedding_status '"doc_123"'
 ```
 
 #### EmbeddingGeneratorAgent
 ```bash
 # Generate embeddings for multiple documents
 golem agent invoke 'embedding-generator-agent()' \
-  'golem-rust:rag/embedding-generator-agent.{generate-embeddings-for-documents}' \
-  '["doc_123", "doc_456", "doc_789"]'
+  generate_embeddings_for_documents '["doc_123", "doc_456", "doc_789"]'
 
 # Generate embeddings for all documents without embeddings
 golem agent invoke 'embedding-generator-agent()' \
-  'golem-rust:rag/embedding-generator-agent.{generate-embeddings-for-all-documents}'
+  generate_embeddings_for_all_documents
 ```
 
 #### S3DocumentSyncAgent
 ```bash
 # Synchronize all buckets (load documents and generate embeddings)
 golem agent invoke 's3-document-sync-agent()' \
-  'golem-rust:rag/s3-document-sync-agent.{sync-all}'
+  sync_all
 ```
 
 ## API Endpoints
@@ -329,24 +323,55 @@ POST /search/similar
 # Get document
 GET /documents/{document_id}
 
-# Generate embeddings
-POST /embeddings/generate/{document_id}
+# Get document metadata
+GET /documents/{document_id}/metadata
 
-# Check embedding status
-GET /embeddings/status/{document_id}
+# List documents with filters
+POST /documents
+{
+  "filters": {
+    "tags": ["tag1", "tag2"],
+    "sources": ["source1"],
+    "content_types": ["Text", "Markdown"],
+    "date_range": {
+      "start": "2024-01-01",
+      "end": "2024-12-31"
+    }
+  },
+  "limit": 10
+}
+```
+
+### Embedding Management
+
+```bash
+# Generate embeddings for a specific document
+POST /embeddings/{document_id}/generate
+
+# Generate embeddings for multiple documents (batch)
+POST /embeddings/generate
+
+# Check embedding status for a document
+GET /embeddings/{document_id}/status
+
+# List documents without embeddings
+GET /embeddings/without
+
+# Remove embeddings for a document
+DELETE /embeddings/{document_id}
 ```
 
 ### S3 Document Management
 
 ```bash
 # Load documents from S3 bucket with optional prefix
-POST /s3/load/{bucket}
+POST /s3/buckets/{bucket}/load
 {
   "prefix": "general/"  // optional
 }
 
 # List documents in S3 bucket with optional prefix
-POST /s3/list/{bucket}
+POST /s3/buckets/{bucket}/list
 {
   "prefix": "general/"  // optional
 }
@@ -360,7 +385,7 @@ POST /s3/sync
 
 **Example: Load from golem-documents bucket with legal prefix**
 ```bash
-POST /s3/load/golem-documents
+POST /s3/buckets/golem-documents/load
 {
   "prefix": "general/"
 }
@@ -369,6 +394,40 @@ POST /s3/load/golem-documents
 **Example: Synchronize all buckets**
 ```bash
 POST /s3/sync
+```
+
+### API Specification
+
+```bash
+# Get OpenAPI specification (JSON)
+GET /openapi.json
+
+# Get OpenAPI specification (YAML)
+GET /openapi.yaml
+```
+
+### Webhook Endpoints
+
+The system provides webhook endpoints for async operation callbacks:
+
+```bash
+# Document agent webhook
+POST /webhooks/document-agent/{promise-id}
+
+# Document embedding generator agent webhook
+POST /webhooks/document-embedding-generator-agent/{promise-id}
+
+# Embedding generator agent webhook
+POST /webhooks/embedding-generator-agent/{promise-id}
+
+# S3 document loader agent webhook
+POST /webhooks/s3-document-loader-agent/{promise-id}
+
+# S3 document sync agent webhook
+POST /webhooks/s3-document-sync-agent/{promise-id}
+
+# Search agent webhook
+POST /webhooks/search-agent/{promise-id}
 ```
 
 ## Hybrid Search Configuration

@@ -1,23 +1,67 @@
 # Schema for IDEA:
-# $schema: https://schema.golem.cloud/app/golem/1.4.2/golem.schema.json
+# $schema: https://schema.golem.cloud/app/golem/1.5.0-dev.2/golem.schema.json
 # Schema for vscode-yaml:
-# yaml-language-server: $schema=https://schema.golem.cloud/app/golem/1.4.2/golem.schema.json
+# yaml-language-server: $schema=https://schema.golem.cloud/app/golem/1.5.0-dev.2/golem.schema.json
 
 # Field reference: https://learn.golem.cloud/app-manifest#field-reference
 # Creating HTTP APIs: https://learn.golem.cloud/invoke/making-custom-apis
 
-app: golem-rag-rust
+manifestVersion: 1.5.0
 
-includes:
-- common-*/golem.yaml
-- components-*/*/golem.yaml
-witDeps:
-- .wit/wit/deps
+app: golem-rag-rust
 
 environments:
   local:
     server: local
-    componentPresets: debug
+#    componentPresets: debug
+    componentPresets: release
   cloud:
     server: cloud
     componentPresets: release
+components:
+  golem-rust:rag:
+    dir: ""
+    templates: rust
+
+    # Component environment variables can reference system environment variables with minijinja syntax:
+    #
+    #   env:
+    #     ENV_VAR_1: "{{ ENV_VAR_1 }}"
+    #     RENAMED_VAR_2: "{{ ENV_VAR_2 }}"
+    #     COMPOSED_VAR_3: "{{ ENV_VAR_3 }}-{{ ENV_VAR_4}}"
+    #
+    env:
+      # RAG System Environment Variables
+      # Database Configuration
+      POSTGRES_HOST: "{{ POSTGRES_HOST }}"
+      POSTGRES_DB: "{{ POSTGRES_DB }}"
+      POSTGRES_USER: "{{ POSTGRES_USER }}"
+      POSTGRES_PASSWORD: "{{ POSTGRES_PASSWORD }}"
+      POSTGRES_PORT: "{{ POSTGRES_PORT }}"
+
+      # S3/RustFS Configuration
+      AWS_ACCESS_KEY_ID: "{{ AWS_ACCESS_KEY_ID }}"
+      AWS_SECRET_ACCESS_KEY: "{{ AWS_SECRET_ACCESS_KEY }}"
+      AWS_DEFAULT_REGION: "{{ AWS_DEFAULT_REGION }}"
+      S3_ENDPOINT_URL: "{{ S3_ENDPOINT_URL }}"
+
+      # Embedding Configuration
+      EMBEDDING_PROVIDER: "{{ EMBEDDING_PROVIDER }}"
+      EMBEDDING_API_BASE: "{{ EMBEDDING_API_BASE }}"
+      EMBEDDING_API_KEY: "{{ EMBEDDING_API_KEY }}"
+      EMBEDDING_MODEL: "{{ EMBEDDING_MODEL }}"
+
+      # Application Configuration
+      RUST_LOG: "{{ RUST_LOG }}"
+
+httpApi:
+  deployments:
+    local:
+    - domain: localhost:9006
+      agents:
+        SearchAgent: {}
+        DocumentAgent: {}
+        S3DocumentLoaderAgent: {}
+        S3DocumentSyncAgent: {}
+        EmbeddingGeneratorAgent: {}
+        DocumentEmbeddingGeneratorAgent: {}

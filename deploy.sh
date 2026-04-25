@@ -130,12 +130,7 @@ if golem-cli deploy "$@"; then
     echo "  http://localhost:9006"
     echo ""
     echo "Available endpoints:"
-    echo "  POST /search                    - Search (semantic and/or keyword)"
-    echo "  POST /search/similar             - Find similar documents"
-    echo "  GET  /documents/{id}           - Get document"
-    echo "  POST /embeddings/generate      - Generate embeddings"
-    echo "  POST /embeddings/generate/{id}   - Generate embeddings"
-    echo "  GET  /embeddings/status/{id}      - Check embedding status"
+    echo "  see: http://localhost:9006/openapi.yaml"
 else
     print_error "Deployment failed!"
     echo ""

@@ -1,3 +1,8 @@
+---
+name: feature-development
+description: "Comprehensive skill for implementing new features in the Golem RAG System, following a structured 3-phase workflow with planning, confirmation, and quality gates."
+---
+
 # Feature Development Skill
 
 ## Description
@@ -69,7 +74,7 @@ Comprehensive skill for implementing new features in the Golem RAG System, follo
 
 **Golem-Specific Skills:**
 - [ ] **Golem Cloud**: Component development, RPC calls
-- [ ] **WASM Target**: `wasm32-wasip1` compilation
+- [ ] **WASM Target**: `wasm32-wasip2` compilation
 - [ ] **cargo-component**: Component building and deployment
 
 ### Database Skills

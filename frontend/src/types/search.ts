@@ -1,8 +1,8 @@
 export interface SearchFilters {
   tags: string[];
   sources: string[];
-  'content-types': ContentType[];
-  'date-range': DateRange | null;
+  content_types: ContentType[];
+  date_range: DateRange | null;
 }
 
 export interface DateRange {
@@ -11,11 +11,11 @@ export interface DateRange {
 }
 
 export enum ContentType {
-  Text = 'text',
-  Markdown = 'markdown',
-  Pdf = 'pdf',
-  Html = 'html',
-  Json = 'json'
+  Text = 'Text',
+  Markdown = 'Markdown',
+  Pdf = 'Pdf',
+  Html = 'Html',
+  Json = 'Json'
 }
 
 export interface HybridSearchConfig {

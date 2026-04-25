@@ -11,8 +11,8 @@ const showFilters = ref(false);
 const filters = ref<SearchFiltersType>({
   tags: [],
   sources: [],
-  'content-types': [],
-  'date-range': null
+  content_types: [],
+  date_range: null
 });
 const newTag = ref('');
 const newSource = ref('');
@@ -32,11 +32,11 @@ const config = ref<HybridSearchConfig>({
 const availableTags = ref(['research', 'documentation', 'tutorial', 'reference', 'guide']);
 const availableSources = ref(['github', 'wikipedia', 'documentation', 'blog', 'academic']);
 const availableContentTypes = ref([
-  { value: 'text' as ContentType, label: 'Text' },
-  { value: 'markdown' as ContentType, label: 'Markdown' },
-  { value: 'pdf' as ContentType, label: 'PDF' },
-  { value: 'html' as ContentType, label: 'HTML' },
-  { value: 'json' as ContentType, label: 'JSON' }
+  { value: 'Text' as ContentType, label: 'Text' },
+  { value: 'Markdown' as ContentType, label: 'Markdown' },
+  { value: 'Pdf' as ContentType, label: 'PDF' },
+  { value: 'Html' as ContentType, label: 'HTML' },
+  { value: 'Json' as ContentType, label: 'JSON' }
 ]);
 
 const handleSearch = () => {
@@ -79,11 +79,11 @@ const removeSource = (source: string) => {
 };
 
 const toggleContentType = (contentType: ContentType) => {
-  const index = filters.value['content-types'].indexOf(contentType);
+  const index = filters.value['content_types'].indexOf(contentType);
   if (index > -1) {
-    filters.value['content-types'].splice(index, 1);
+    filters.value['content_types'].splice(index, 1);
   } else {
-    filters.value['content-types'].push(contentType);
+    filters.value['content_types'].push(contentType);
   }
 };
 
@@ -91,8 +91,8 @@ const clearAllFilters = () => {
   filters.value = {
     tags: [],
     sources: [],
-    'content-types': [],
-    'date-range': null
+    content_types: [],
+    date_range: null
   };
   dateRange.value = { start: '', end: '' };
   newTag.value = '';
@@ -117,7 +117,7 @@ watch(dateRange, (newRange) => {
     const startDate = formatDateForPostgres(new Date(newRange.start));
     const endDate = formatDateForPostgres(new Date(newRange.end), true);
     
-    filters.value['date-range'] = { 
+    filters.value['date_range'] = { 
       start: startDate, 
       end: endDate 
     };
@@ -130,7 +130,7 @@ watch(dateRange, (newRange) => {
     // Update the dateRange ref to show the auto-set end date
     dateRange.value.end = today.toISOString().split('T')[0];
     
-    filters.value['date-range'] = { 
+    filters.value['date_range'] = { 
       start: startDate, 
       end: endDate 
     };
@@ -144,13 +144,13 @@ watch(dateRange, (newRange) => {
     // Update the dateRange ref to show the auto-set start date
     dateRange.value.start = startOfYear.toISOString().split('T')[0];
     
-    filters.value['date-range'] = { 
+    filters.value['date_range'] = { 
       start: startDate, 
       end: formattedEndDate 
     };
   } else {
     // Clear date filter if no dates are selected
-    filters.value['date-range'] = null;
+    filters.value['date_range'] = null;
   }
 }, { deep: true });
 
@@ -218,7 +218,7 @@ watch([() => config.value.semantic_weight, () => config.value.keyword_weight], (
           >
             <input 
               type="checkbox" 
-              :checked="filters['content-types'].includes(type.value)"
+              :checked="filters['content_types'].includes(type.value)"
               @change="toggleContentType(type.value)"
             />
             <span>{{ type.label }}</span>
