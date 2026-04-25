@@ -139,9 +139,9 @@ The system consists of 6 core agents running on Golem Cloud, coordinated through
 
 ### Prerequisites
 
-- Rust with `wasm32-wasip1` target: `rustup target add wasm32-wasip1`
+- Rust with `wasm32-wasip2` target: `rustup target add wasm32-wasip2`
 - `cargo-component` version 0.21.1: `cargo install --force cargo-component@0.21.1`
-- Golem CLI (`golem`) v1.4.2: download from https://github.com/golemcloud/golem/releases
+- Golem CLI (`golem`) v1.5.0: download from https://github.com/golemcloud/golem/releases
 - Docker and Docker Compose
 - S3 buckets (optional, for document loading)
 
