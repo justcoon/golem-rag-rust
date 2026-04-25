@@ -66,13 +66,13 @@ postgres --> postgres : "Store:\n- Documents\n- Document Chunks\n- Embeddings"
 note right of gateway
   <b>HTTP API Gateway</b>
   - Routes REST API to agents
-  • POST /search → SearchAgent
-  • POST /search/similar → SearchAgent
-  • GET /documents/{id} → DocumentAgent
-  • POST /embeddings/generate → EmbeddingGeneratorAgent
-  • POST /embeddings/generate/{id} → DocumentEmbeddingGeneratorAgent
-  • POST /s3/load/{namespace} → S3DocumentLoaderAgent
-  • POST /s3/sync → S3DocumentSyncAgent
+  • /search → SearchAgent
+  • /search/similar → SearchAgent
+  • /documents/{id} → DocumentAgent
+  • /embeddings/generate → EmbeddingGeneratorAgent
+  • /embeddings/generate/{id} → DocumentEmbeddingGeneratorAgent
+  • /s3/buckets/* → S3DocumentLoaderAgent
+  • /s3/sync/* → S3DocumentSyncAgent
   - Transforms REST to Golem RPC
 end note
 
@@ -121,9 +121,12 @@ note right of s3_sync
   <b>S3DocumentSyncAgent</b>
   - Coordinates synchronization across buckets
   - Orchestrates loading and embedding generation
+  - **Scheduled synchronization** with configurable intervals
+  - **Sync history tracking**
+  - **Automatic rescheduling** for repetitive syncs
   - Comprehensive sync results with error handling
-  - Tracks success/failure status
-  - State: Ephemeral
+  - Tracks success/failure status per bucket
+  - State: Persistent
 end note
 
 note right of postgres
@@ -152,33 +155,6 @@ note right of ollama
   - Local embedding generation
   - Configurable models
   - Fallback support
-end note
-
-' Add data flow annotations
-note bottom of search
-  <b>Hybrid Search Flow:</b>
-  1. Generate query embedding (Ollama)
-  2. Vector similarity search (PostgreSQL)
-  3. Full-text search (PostgreSQL)
-  4. Fuse results with RRF
-  5. Return ranked results
-end note
-
-note bottom of s3_loader
-  <b>Document Loading Flow:</b>
-  1. List S3 objects in namespace
-  2. Download and parse documents
-  3. Generate metadata and IDs
-  4. Store in PostgreSQL
-end note
-
-note bottom of s3_sync
-  <b>Document Synchronization Flow:</b>
-  1. List all available buckets
-  2. For each bucket: load documents
-  3. Generate embeddings for new documents
-  4. Track success/failure per bucket
-  5. Return comprehensive sync results
 end note
 
 @enduml
