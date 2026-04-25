@@ -62,17 +62,26 @@ S3 integration for document loading:
 **Note**: Uses `bucket` and optional `prefix` parameters for flexible S3 path filtering. The namespace is automatically extracted from the actual S3 key path structure (e.g., "legal/contracts/file.pdf" → namespace: "legal/contracts"). Supports any prefix-based filtering for maximum flexibility.
 
 ### S3DocumentSyncAgent
-S3 document synchronization and processing coordinator:
+S3 document synchronization and processing coordinator with scheduling capabilities:
 
 **Methods:**
 - `sync_all()` - Synchronize all buckets by loading documents and generating embeddings
+- `set_sync_schedule(interval_minutes, is_repetitive)` - Configure automatic sync schedule
+- `get_sync_schedule()` - Get current sync schedule configuration
+- `execute_scheduled_sync()` - Execute sync if scheduled time has arrived
+- `delete_sync_schedule()` - Remove current sync schedule
+- `get_sync_history()` - Get complete sync history with all previous results
 
 **Features:**
 - Coordinates document loading across all S3 buckets
 - Automatically generates embeddings for newly loaded documents
+- **Scheduled synchronization** with configurable intervals and repetition
+- **Sync history tracking** with detailed results and statistics
+- **Automatic rescheduling** for repetitive sync operations
 - Provides comprehensive sync results with success/failure tracking
 - Handles errors gracefully and continues processing other buckets
 - Returns detailed statistics on documents loaded and embeddings generated
+- Maintains sync history
 
 ## Architecture
 
@@ -118,9 +127,12 @@ The system consists of 6 core agents running on Golem Cloud, coordinated through
 **S3DocumentSyncAgent**
 - Coordinates synchronization across all S3 buckets
 - Orchestrates document loading and embedding generation
+- **Scheduled synchronization** with configurable intervals and automatic rescheduling
+- **Sync history management** with detailed tracking of past operations
 - Provides comprehensive sync results with error handling
 - Tracks success/failure status for each bucket
 - Returns detailed statistics on processing results
+- Maintains persistent sync state across agent restarts
 
 ### Data Flow
 
@@ -190,12 +202,10 @@ Load documents from S3-compatible storage using flexible prefix-based filtering:
 **Step C: Trigger document loading in the agent**
 ```bash
 # With prefix
-golem agent invoke 's3-document-loader-agent()' \
-  load_documents '"golem-documents"' '"general/"'
+golem agent invoke 'S3DocumentLoaderAgent()' load_documents '"golem-documents"' '"general/"'
 
 # Without prefix (load all documents)
-golem agent invoke 's3-document-loader-agent()' \
-  load_documents '"golem-documents"' '""'
+golem agent invoke 'S3DocumentLoaderAgent()' load_documents '"golem-documents"' '""'
 ```
 
 **Features:**
@@ -228,34 +238,46 @@ curl -X POST http://localhost:9006/search \
 #### DocumentEmbeddingGeneratorAgent
 ```bash
 # Generate embeddings for a specific document
-golem agent invoke 'document-embedding-generator-agent()' \
-  generate_embeddings_for_document '"doc_123"'
+golem agent invoke 'DocumentEmbeddingGeneratorAgent()' generate_embeddings_for_document '"doc_123"'
 
 # Remove embeddings for a document
-golem agent invoke 'document-embedding-generator-agent()' \
-  remove_embeddings_for_document '"doc_123"'
+golem agent invoke 'DocumentEmbeddingGeneratorAgent()' remove_embeddings_for_document '"doc_123"'
 
 # Get embedding status for a document
-golem agent invoke 'document-embedding-generator-agent()' \
-  get_embedding_status '"doc_123"'
+golem agent invoke 'DocumentEmbeddingGeneratorAgent()' get_embedding_status '"doc_123"'
 ```
 
 #### EmbeddingGeneratorAgent
 ```bash
 # Generate embeddings for multiple documents
-golem agent invoke 'embedding-generator-agent()' \
-  generate_embeddings_for_documents '["doc_123", "doc_456", "doc_789"]'
+golem agent invoke 'EmbeddingGeneratorAgent()' generate_embeddings_for_documents '["doc_123", "doc_456", "doc_789"]'
 
 # Generate embeddings for all documents without embeddings
-golem agent invoke 'embedding-generator-agent()' \
-  generate_embeddings_for_all_documents
+golem agent invoke 'EmbeddingGeneratorAgent()' generate_embeddings_for_all_documents
 ```
 
 #### S3DocumentSyncAgent
 ```bash
 # Synchronize all buckets (load documents and generate embeddings)
-golem agent invoke 's3-document-sync-agent()' \
-  sync_all
+golem agent invoke 'S3DocumentSyncAgent()' sync_all
+
+# Set up repetitive sync schedule (every 30 minutes)
+golem agent invoke 'S3DocumentSyncAgent()' set_sync_schedule 30 true
+
+# Set up one-time sync schedule (execute once after 60 minutes)
+golem agent invoke 'S3DocumentSyncAgent()' set_sync_schedule 60 false
+
+# Get current sync schedule
+golem agent invoke 'S3DocumentSyncAgent()' get_sync_schedule
+
+# Execute scheduled sync if due
+golem agent invoke 'S3DocumentSyncAgent()' execute_scheduled_sync
+
+# Delete sync schedule
+golem agent invoke 'S3DocumentSyncAgent()' delete_sync_schedule
+
+# Get sync history
+golem agent invoke 'S3DocumentSyncAgent()' get_sync_history
 ```
 
 ## API Endpoints
@@ -380,7 +402,26 @@ POST /s3/buckets/{bucket}/list
 GET /s3/buckets
 
 # Synchronize all buckets (load documents and generate embeddings)
-POST /s3/sync
+POST /s3/sync/execute
+
+# Set sync schedule
+POST /s3/sync/schedule
+{
+  "interval_minutes": 30,
+  "is_repetitive": true
+}
+
+# Get sync schedule
+GET /s3/sync/schedule
+
+# Execute scheduled sync if due
+POST /s3/sync/execute-scheduled
+
+# Delete sync schedule
+DELETE /s3/sync/schedule
+
+# Get sync history
+GET /s3/sync/history
 ```
 
 **Example: Load from golem-documents bucket with legal prefix**
@@ -391,9 +432,18 @@ POST /s3/buckets/golem-documents/load
 }
 ```
 
+**Example: Set up repetitive sync schedule**
+```bash
+POST /s3/sync/schedule
+{
+  "interval_minutes": 30,
+  "is_repetitive": true
+}
+```
+
 **Example: Synchronize all buckets**
 ```bash
-POST /s3/sync
+POST /s3/sync/execute
 ```
 
 ### API Specification
@@ -406,29 +456,6 @@ GET /openapi.json
 GET /openapi.yaml
 ```
 
-### Webhook Endpoints
-
-The system provides webhook endpoints for async operation callbacks:
-
-```bash
-# Document agent webhook
-POST /webhooks/document-agent/{promise-id}
-
-# Document embedding generator agent webhook
-POST /webhooks/document-embedding-generator-agent/{promise-id}
-
-# Embedding generator agent webhook
-POST /webhooks/embedding-generator-agent/{promise-id}
-
-# S3 document loader agent webhook
-POST /webhooks/s3-document-loader-agent/{promise-id}
-
-# S3 document sync agent webhook
-POST /webhooks/s3-document-sync-agent/{promise-id}
-
-# Search agent webhook
-POST /webhooks/search-agent/{promise-id}
-```
 
 ## Hybrid Search Configuration
 
@@ -475,6 +502,38 @@ HybridSearchResult {
     combined_score: f32,
     match_type: MatchType,
     relevance_explanation: Option<String>,
+}
+```
+
+### Sync Schedule
+```rust
+SyncSchedule {
+    interval_minutes: u64,
+    is_repetitive: bool,
+    last_execution: Option<String>,
+    next_execution: Option<String>,
+}
+```
+
+### Sync Result
+```rust
+SyncResult {
+    bucket_results: Vec<BucketSyncResult>,
+    total_buckets_processed: usize,
+    total_documents_loaded: usize,
+    total_embeddings_generated: u32,
+    sync_timestamp: String,
+}
+```
+
+### Bucket Sync Result
+```rust
+BucketSyncResult {
+    bucket_name: String,
+    documents_loaded: usize,
+    embeddings_generated: u32,
+    errors: Vec<String>,
+    success: bool,
 }
 ```
 
