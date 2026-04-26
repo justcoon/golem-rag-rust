@@ -3,7 +3,7 @@ import { computed } from 'vue';
 import { marked } from 'marked';
 
 const props = defineProps(['document', 'show']);
-const emit = defineEmits(['close']);
+const emit = defineEmits(['close', 'find-similar']);
 
 const renderedContent = computed(() => {
   if (!props.document?.content) return '';
@@ -13,6 +13,10 @@ const renderedContent = computed(() => {
 const formatDate = (dateStr) => {
   if (!dateStr) return 'N/A';
   return new Date(dateStr).toLocaleString();
+};
+
+const onFindSimilar = () => {
+  emit('find-similar', props.document.id);
 };
 </script>
 
@@ -24,7 +28,12 @@ const formatDate = (dateStr) => {
           <h2>{{ document.title || 'Document Preview' }}</h2>
           <span class="doc-id">{{ document.id }}</span>
         </div>
-        <button class="close-btn" @click="emit('close')">&times;</button>
+        <div class="header-actions">
+          <button class="similar-btn" @click="onFindSimilar">
+            ✨ Find Similar
+          </button>
+          <button class="close-btn" @click="emit('close')">&times;</button>
+        </div>
       </div>
 
       <div class="modal-body">
@@ -106,6 +115,33 @@ const formatDate = (dateStr) => {
   font-family: monospace;
   font-size: 0.8rem;
   color: var(--text-muted);
+}
+
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.similar-btn {
+  background: rgba(147, 51, 234, 0.1);
+  border: 1px solid rgba(147, 51, 234, 0.3);
+  color: #a855f7;
+  padding: 6px 12px;
+  border-radius: 8px;
+  font-size: 0.85rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.similar-btn:hover {
+  background: rgba(147, 51, 234, 0.2);
+  border-color: #a855f7;
+  transform: translateY(-1px);
 }
 
 .close-btn {

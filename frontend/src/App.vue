@@ -7,24 +7,59 @@ import DocumentModal from './components/DocumentModal.vue';
 import type { SearchFilters as SearchFiltersType, HybridSearchConfig } from './types/search';
 
 const results = ref([]);
+const originalResults = ref([]);
 const loading = ref(false);
 const error = ref(null);
 
 const selectedDocument = ref(null);
 const showModal = ref(false);
+const similarityContext = ref<string | null>(null);
 
 const onSearch = async (query: string, config: HybridSearchConfig, filters: SearchFiltersType | null) => {
   loading.value = true;
   error.value = null;
   results.value = [];
+  originalResults.value = [];
+  similarityContext.value = null;
   
   try {
-    results.value = await ApiService.hybridSearch(query, { filters, config });
+    const searchResults = await ApiService.hybridSearch(query, { filters, config });
+    results.value = searchResults;
+    originalResults.value = searchResults;
   } catch (err) {
     error.value = "Failed to fetch results. Is the Golem server running?";
   } finally {
     loading.value = false;
   }
+};
+
+const onFindSimilar = async (docId: string) => {
+  loading.value = true;
+  error.value = null;
+  showModal.value = false;
+  
+  try {
+    const similarResults = await ApiService.findSimilar(docId);
+    // Map SearchResult to HybridSearchResult structure expected by ResultCard
+    results.value = similarResults.map((res: any) => ({
+      ...res,
+      combined_score: res.similarity_score,
+      semantic_score: res.similarity_score,
+      keyword_score: 0.0,
+      match_type: 'SemanticOnly'
+    }));
+    similarityContext.value = docId;
+  } catch (err) {
+    error.value = "Failed to find similar documents.";
+    console.error(err);
+  } finally {
+    loading.value = false;
+  }
+};
+
+const clearSimilarity = () => {
+  similarityContext.value = null;
+  results.value = originalResults.value;
 };
 
 const openPreview = async (docId) => {
@@ -50,6 +85,14 @@ const openPreview = async (docId) => {
     <main class="container">
       <SearchBar @search="onSearch" :loading="loading" />
 
+      <div v-if="similarityContext" class="similarity-banner glass animate-fade-in">
+        <div class="banner-content">
+          <span class="magic-icon">✨</span>
+          <p>Showing documents similar to <code>{{ similarityContext }}</code></p>
+        </div>
+        <button class="clear-btn" @click="clearSimilarity">Clear</button>
+      </div>
+
       <div v-if="error" class="error-state glass animate-fade-in">
         <p>⚠️ {{ error }}</p>
       </div>
@@ -60,6 +103,7 @@ const openPreview = async (docId) => {
           :key="res.chunk.id" 
           :result="res" 
           @preview="openPreview"
+          @find-similar="onFindSimilar"
         />
       </div>
 
@@ -73,6 +117,7 @@ const openPreview = async (docId) => {
       :document="selectedDocument" 
       :show="showModal" 
       @close="showModal = false" 
+      @find-similar="onFindSimilar"
     />
 
     <footer class="app-footer">
@@ -123,6 +168,56 @@ const openPreview = async (docId) => {
   display: flex;
   flex-direction: column;
   gap: 16px;
+}
+
+.similarity-banner {
+  margin-top: 24px;
+  padding: 12px 20px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-color: rgba(147, 51, 234, 0.3);
+  background: rgba(147, 51, 234, 0.05);
+}
+
+.banner-content {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.magic-icon {
+  font-size: 1.2rem;
+}
+
+.banner-content p {
+  margin: 0;
+  font-size: 0.95rem;
+}
+
+.banner-content code {
+  background: rgba(255, 255, 255, 0.1);
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-family: monospace;
+  color: var(--primary);
+}
+
+.clear-btn {
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  color: var(--text-muted);
+  padding: 4px 12px;
+  border-radius: 6px;
+  font-size: 0.8rem;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.clear-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: white;
+  border-color: white;
 }
 
 .error-state {

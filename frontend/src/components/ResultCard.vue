@@ -2,7 +2,7 @@
 import { computed } from 'vue';
 
 const props = defineProps(['result']);
-const emit = defineEmits(['preview']);
+const emit = defineEmits(['preview', 'find-similar']);
 
 const formatScore = (score) => (score * 100).toFixed(1) + '%';
 
@@ -21,6 +21,11 @@ const highlightedExplanation = computed(() => {
   // Replace [keyword] with <strong>keyword</strong> for visual highlighting
   return explanation.replace(/\[(.*?)\]/g, '<strong>$1</strong>');
 });
+
+const onFindSimilar = (e) => {
+  e.stopPropagation();
+  emit('find-similar', props.result.chunk['document_id']);
+};
 </script>
 
 <template>
@@ -43,6 +48,13 @@ const highlightedExplanation = computed(() => {
 
     <div class="result-footer">
       <span class="doc-id">Document: {{ result.chunk['document_id'] }}</span>
+      <button 
+        class="similar-btn" 
+        title="Find Similar Documents"
+        @click="onFindSimilar"
+      >
+        ✨ Similar
+      </button>
     </div>
   </div>
 </template>
@@ -104,6 +116,27 @@ const highlightedExplanation = computed(() => {
   font-size: 0.8rem;
   color: var(--text-muted);
   display: flex;
-  justify-content: flex-end;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.similar-btn {
+  background: rgba(147, 51, 234, 0.1);
+  border: 1px solid rgba(147, 51, 234, 0.3);
+  color: #a855f7;
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-size: 0.75rem;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.similar-btn:hover {
+  background: rgba(147, 51, 234, 0.2);
+  border-color: #a855f7;
+  transform: translateY(-1px);
 }
 </style>
