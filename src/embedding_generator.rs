@@ -442,7 +442,7 @@ impl DocumentEmbeddingGeneratorAgentImpl {
         let embedding = Embedding {
             id: uuid::Uuid::new_v4().to_string(),
             chunk_id: document_id.to_string(), // Use document_id instead of chunk_id for now
-            vector: embedding_vector,
+            vector: Vector(embedding_vector),
             model_name: self.get_model_name(),
             created_at: Utc::now().to_rfc3339(), // Use actual current time
         };

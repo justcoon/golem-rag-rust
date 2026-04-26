@@ -1,5 +1,5 @@
 use crate::common_lib::database::{
-    DbRowDecoder, DbValueDecoder, PostgresDbColumn, PostgresDbRow, PostgresDbValue,
+    DbRowDecoder, DbValueDecoder, DbValueEncoder, PostgresDbColumn, PostgresDbRow, PostgresDbValue,
 };
 use golem_rust::Schema;
 use serde::{Deserialize, Serialize};
@@ -147,10 +147,34 @@ crate::db_row_decoder!(DocumentChunk {
 });
 
 #[derive(Clone, Debug, Schema, Serialize, Deserialize)]
+pub struct Vector(pub Vec<f32>);
+
+impl DbValueDecoder for Vector {
+    fn decode(value: &PostgresDbValue) -> anyhow::Result<Self> {
+        match value {
+            PostgresDbValue::Vector(vals) => Ok(Vector(vals.to_vec())),
+            _ => Err(anyhow::anyhow!("Expected Vector, got {:?}", value)),
+        }
+    }
+}
+
+impl DbValueEncoder for Vector {
+    fn encode(self) -> PostgresDbValue {
+        PostgresDbValue::Vector(self.0)
+    }
+}
+
+impl DbValueEncoder for &Vector {
+    fn encode(self) -> PostgresDbValue {
+        PostgresDbValue::Vector(self.0.clone())
+    }
+}
+
+#[derive(Clone, Debug, Schema, Serialize, Deserialize)]
 pub struct Embedding {
     pub id: String,
     pub chunk_id: String,
-    pub vector: Vec<f32>,
+    pub vector: Vector,
     pub model_name: String,
     pub created_at: String,
 }
