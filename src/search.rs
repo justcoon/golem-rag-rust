@@ -118,7 +118,7 @@ impl SearchAgent for SearchAgentImpl {
             let query_embedding = self.generate_query_embedding(&query).await?;
             semantic_results = self.vector_similarity_search(
                 &db_helper,
-                &query_embedding,
+                &Vector(query_embedding),
                 &query,
                 limit,
                 threshold,
@@ -165,7 +165,7 @@ impl SearchAgentImpl {
     fn vector_similarity_search(
         &self,
         db_helper: &DatabaseHelper,
-        query_embedding: &[f32],
+        query_embedding: &Vector,
         query: &str,
         limit: usize,
         threshold: f32,
@@ -220,9 +220,9 @@ impl SearchAgentImpl {
         &self,
         db_helper: &DatabaseHelper,
         document_id: &str,
-    ) -> AgentResult<Vec<f32>> {
+    ) -> AgentResult<Vector> {
         let query = r#"
-            SELECT e.embedding::float8[]
+            SELECT e.embedding
             FROM document_embeddings e
             WHERE e.document_id = $1 AND e.embedding_status LIKE 'completed%'
             LIMIT 1
@@ -236,7 +236,7 @@ impl SearchAgentImpl {
             })?;
 
         use crate::common_lib::database::decode::{DbResultDecoder, Single};
-        Single::<Vec<f32>>::decode_result(result)
+        Single::<Vector>::decode_result(result)
             .map_err(|e| ErrorResponse::from(format!("Failed to decode embedding: {:?}", e)))?
             .into_iter()
             .next()
