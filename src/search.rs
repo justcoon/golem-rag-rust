@@ -99,6 +99,10 @@ impl SearchAgent for SearchAgentImpl {
     ) -> AgentResult<Vec<HybridSearchResult>> {
         log::info!("Performing search for query: {}", query);
 
+        if query.is_empty() {
+            return Ok(Vec::new());
+        }
+
         let db_helper = DatabaseHelper::from_env()
             .map_err(|e| format!("Failed to create database helper: {:?}", e))?;
 
@@ -183,13 +187,13 @@ impl SearchAgentImpl {
                 dc.start_pos,
                 dc.end_pos,
                 dc.token_count,
-                MAX(1 - (e.embedding <=> $2::vector)) as similarity_score
+                MAX(1 - (e.embedding <=> $2)) as similarity_score
             FROM document_chunks dc
             JOIN document_embeddings e ON dc.document_id = e.document_id AND dc.chunk_index = e.chunk_index
             WHERE e.embedding_status LIKE 'completed%'
               AND {}
             GROUP BY dc.id, dc.document_id, dc.chunk_index, dc.content, dc.start_pos, dc.end_pos, dc.token_count
-            HAVING MAX(1 - (e.embedding <=> $2::vector)) >= $3
+            HAVING MAX(1 - (e.embedding <=> $2)) >= $3
             ORDER BY similarity_score DESC
             LIMIT $1
             "#,

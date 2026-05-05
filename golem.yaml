@@ -53,7 +53,13 @@ components:
 
       # Application Configuration
       RUST_LOG: "{{ RUST_LOG }}"
-
+mcp:
+  deployments:
+    local:
+      - domain: localhost:9007
+        agents:
+          SearchAgent: {}
+          DocumentAgent: {}
 httpApi:
   deployments:
     local:
