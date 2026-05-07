@@ -166,7 +166,7 @@ struct S3DocumentSyncAgentImpl {
     state: SyncState,
 }
 
-async fn sync_bucket(bucket: String, s3_loader: &S3DocumentLoaderAgentClient) -> BucketSyncResult {
+async fn sync_bucket(bucket: String) -> BucketSyncResult {
     log::info!("Processing bucket: {}", bucket);
 
     let mut bucket_result = BucketSyncResult {
@@ -176,6 +176,8 @@ async fn sync_bucket(bucket: String, s3_loader: &S3DocumentLoaderAgentClient) ->
         errors: Vec::new(),
         success: true,
     };
+
+    let s3_loader = S3DocumentLoaderAgentClient::new_phantom();
 
     // Load documents from bucket (this handles change detection)
     match s3_loader.load_documents(bucket.clone(), None).await {
@@ -257,7 +259,7 @@ impl S3DocumentSyncAgent for S3DocumentSyncAgentImpl {
         // Process all buckets in parallel
         let bucket_futures: Vec<_> = buckets
             .into_iter()
-            .map(|bucket| sync_bucket(bucket, &s3_loader))
+            .map(|bucket| sync_bucket(bucket))
             .collect();
 
         let bucket_results = future::join_all(bucket_futures).await;

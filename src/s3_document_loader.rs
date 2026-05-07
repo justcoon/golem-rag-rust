@@ -12,7 +12,7 @@ use uuid::Uuid;
 
 pub type AgentResult<T> = std::result::Result<T, ErrorResponse>;
 
-#[agent_definition(mount = "/s3")]
+#[agent_definition(mount = "/s3", ephemeral)]
 pub trait S3DocumentLoaderAgent {
     fn new() -> Self;
 
