@@ -1,5 +1,6 @@
 use anyhow::Result;
-use golem_rust::Schema;
+use golem_rust::{ConfigSchema, Schema};
+use golem_rust::agentic::Secret;
 use serde::{Deserialize, Serialize};
 
 // Re-export Golem RDBMS types for convenience
@@ -601,6 +602,18 @@ macro_rules! encode_params {
         ]
     };
 }
+
+#[derive(ConfigSchema)]
+pub struct PostgresDbConfig2 {
+    pub host: String,
+    pub db: String,
+    #[config_schema(secret)]
+    pub user: Secret<String>,
+    #[config_schema(secret)]
+    pub password: Secret<String>,
+    pub port: String,
+}
+
 
 #[derive(Clone, Debug, Schema, Serialize, Deserialize)]
 pub struct PostgresDbConfig {

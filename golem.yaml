@@ -22,6 +22,21 @@ components:
   golem-rust:rag:
     dir: ""
     templates: rust
+    config:
+      postgres:
+        host: "localhost"
+        db: "golem_rag"
+        port: "5432"
+      s3:
+        accessKeyId: "{{ AWS_ACCESS_KEY_ID }}"
+        secretAccessKey: "{{ AWS_SECRET_ACCESS_KEY }}"
+        region: "{{ AWS_DEFAULT_REGION }}"
+        endpointUrl: "{{ S3_ENDPOINT_URL }}"
+      embedding:
+        provider: "{{ EMBEDDING_PROVIDER }}"
+        apiBase: "{{ EMBEDDING_API_BASE }}"
+        model: "{{ EMBEDDING_MODEL }}"
+
 
     # Component environment variables can reference system environment variables with minijinja syntax:
     #
@@ -53,6 +68,22 @@ components:
 
       # Application Configuration
       RUST_LOG: "{{ RUST_LOG }}"
+
+
+# Secret defaults for local development - these are NOT used in production environments
+# Production secrets must be created via: golem agent-secret create <path> --secret-type <type> --secret-value <value>
+secretDefaults:
+  local:
+    postgres:
+      host: "localhost"
+      db: "golem_rag"
+      port: "5432"
+    s3:
+      accessKeyId: "{{ AWS_ACCESS_KEY_ID }}"
+      secretAccessKey: "{{ AWS_SECRET_ACCESS_KEY }}"
+    embedding:
+      apiKey: "{{ EMBEDDING_API_KEY }}"
+
 mcp:
   deployments:
     local:

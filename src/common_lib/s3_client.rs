@@ -1,9 +1,21 @@
 use chrono::Utc;
-use golem_rust::Schema;
+use golem_rust::agentic::Secret;
+use golem_rust::{ConfigSchema, Schema};
 use golem_wasi_http::{Client, Method};
 use hmac::{Hmac, Mac};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+
+
+#[derive(ConfigSchema)]
+pub struct S3Config2 {
+    #[config_schema(secret)]
+    pub access_key_id: Secret<String>,
+    #[config_schema(secret)]
+    pub secret_access_key: Secret<String>,
+    pub region: String,
+    pub endpoint_url: Option<String>, // Custom S3-compatible endpoint
+}
 
 // S3 Document Source Types
 #[derive(Clone, Debug, Serialize, Deserialize)]
