@@ -90,9 +90,9 @@ print_success "All critical environment variables are set"
 
 # Show deployment configuration
 print_status "Deployment configuration:"
-echo "  Database URL: ${DB_URL:0:50}..."
 echo "  S3 Region: ${AWS_DEFAULT_REGION}"
 echo "  Embedding Model: ${EMBEDDING_MODEL}"
+echo "  Embedding Provider: ${EMBEDDING_PROVIDER}"
 echo "  Log Level: ${RUST_LOG:-info}"
 
 # Check if Golem server is running

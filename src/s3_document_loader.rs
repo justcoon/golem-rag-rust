@@ -1,14 +1,16 @@
-use crate::common_lib::database::{DatabaseHelper, PostgresDbConfig2};
-use crate::common_lib::s3_client::{S3Client, S3Config2};
+use crate::common_lib::database::{DatabaseHelper, PostgresDbConfig};
 use crate::common_lib::s3_client::S3DocumentSource;
+use crate::common_lib::s3_client::{S3Client, S3Config};
 use crate::database_helper::DatabaseHelperRagext;
 use crate::encode_params;
 use crate::models::*;
 use chrono::DateTime;
 
-use golem_rust::{agent_definition, agent_implementation, description, endpoint, prompt, ConfigSchema};
-use std::string::String;
 use golem_rust::agentic::Config;
+use golem_rust::{
+    ConfigSchema, agent_definition, agent_implementation, description, endpoint, prompt,
+};
+use std::string::String;
 use uuid::Uuid;
 
 pub type AgentResult<T> = std::result::Result<T, ErrorResponse>;
@@ -16,9 +18,9 @@ pub type AgentResult<T> = std::result::Result<T, ErrorResponse>;
 #[derive(ConfigSchema)]
 pub struct S3DocumentLoaderAgentConfig {
     #[config_schema(nested)]
-    pub s3: S3Config2,
+    pub s3: S3Config,
     #[config_schema(nested)]
-    pub db: PostgresDbConfig2,
+    pub db: PostgresDbConfig,
 }
 
 #[agent_definition(mount = "/s3", ephemeral)]
@@ -63,14 +65,13 @@ pub trait S3DocumentLoaderAgent {
 
 struct S3DocumentLoaderAgentImpl {
     s3_client: S3Client,
-    config: Config<S3DocumentLoaderAgentConfig>
+    config: Config<S3DocumentLoaderAgentConfig>,
 }
 
 #[agent_implementation]
 impl S3DocumentLoaderAgent for S3DocumentLoaderAgentImpl {
     fn new(#[agent_config] config: Config<S3DocumentLoaderAgentConfig>) -> Self {
-        let s3_client =
-            S3Client::from_env().expect("Failed to initialize S3 client from environment");
+        let s3_client = S3Client::new(config.get().s3.into()).expect("Failed to create S3 client");
 
         Self { s3_client, config }
     }
@@ -89,7 +90,7 @@ impl S3DocumentLoaderAgent for S3DocumentLoaderAgentImpl {
 
         // Step 2: Process each document
         let mut loaded_document_ids = Vec::new();
-        let db_helper = DatabaseHelper::from_env()
+        let db_helper = DatabaseHelper::from(self.config.get().db)
             .map_err(|e| format!("Failed to create database helper: {:?}", e))?;
 
         for s3_doc in &s3_documents {

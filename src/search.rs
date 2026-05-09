@@ -1,20 +1,21 @@
-use crate::common_lib::database::{DatabaseHelper, PostgresDbConfig2};
+use crate::common_lib::database::{DatabaseHelper, PostgresDbConfig};
 use crate::common_lib::embedding_client::{EmbeddingClient, EmbeddingConfig};
 use crate::encode_params;
 use crate::models::*;
-use golem_rust::{agent_definition, agent_implementation, description, endpoint, prompt, ConfigSchema};
-use std::string::String;
 use golem_rust::agentic::Config;
+use golem_rust::{
+    ConfigSchema, agent_definition, agent_implementation, description, endpoint, prompt,
+};
+use std::string::String;
 
 pub type AgentResult<T> = std::result::Result<T, ErrorResponse>;
-
 
 #[derive(ConfigSchema)]
 pub struct SearchAgentConfig {
     #[config_schema(nested)]
     pub embedding: EmbeddingConfig,
     #[config_schema(nested)]
-    pub db: PostgresDbConfig2,
+    pub db: PostgresDbConfig,
 }
 
 #[agent_definition(mount = "/search", ephemeral)]
@@ -66,9 +67,7 @@ struct SearchAgentImpl {
 #[agent_implementation]
 impl SearchAgent for SearchAgentImpl {
     fn new(#[agent_config] config: Config<SearchAgentConfig>) -> Self {
-        Self {
-            config
-        }
+        Self { config }
     }
 
     async fn find_similar_documents(
@@ -78,7 +77,7 @@ impl SearchAgent for SearchAgentImpl {
     ) -> AgentResult<Vec<SearchResult>> {
         log::info!("Finding similar documents to: {}", document_id);
 
-        let db_helper = DatabaseHelper::from_env()
+        let db_helper = DatabaseHelper::from(self.config.get().db)
             .map_err(|e| format!("Failed to create database helper: {:?}", e))?;
 
         let limit = limit.map(|l| l as usize).unwrap_or(10);
@@ -117,7 +116,7 @@ impl SearchAgent for SearchAgentImpl {
             return Ok(Vec::new());
         }
 
-        let db_helper = DatabaseHelper::from_env()
+        let db_helper = DatabaseHelper::from(self.config.get().db)
             .map_err(|e| format!("Failed to create database helper: {:?}", e))?;
 
         let limit = limit.map(|l| l as usize).unwrap_or(10);
@@ -158,7 +157,7 @@ impl SearchAgent for SearchAgentImpl {
 
 impl SearchAgentImpl {
     async fn generate_query_embedding(&self, query: &str) -> AgentResult<Vec<f32>> {
-        let embedding_client = EmbeddingClient::from_env().map_err(|e| {
+        let embedding_client = EmbeddingClient::from(self.config.get().embedding).map_err(|e| {
             ErrorResponse::from(format!(
                 "Failed to create embedding client from environment: {:?}",
                 e

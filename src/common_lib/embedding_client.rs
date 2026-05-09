@@ -1,8 +1,9 @@
 use anyhow::Result;
-use golem_rust::{ConfigSchema, Schema};
 use golem_rust::agentic::Secret;
+use golem_rust::{ConfigSchema, Schema};
 use golem_wasi_http::{Client, Method};
 use serde::{Deserialize, Serialize};
+use std::str::FromStr;
 
 /// Default embedding dimension for mock embeddings
 pub const DEFAULT_EMBEDDING_DIMENSION: usize = 768;
@@ -61,7 +62,31 @@ pub struct EmbeddingConfig {
     #[config_schema(secret)]
     pub api_key: Secret<String>,
     pub api_base: String,
-    pub provider: EmbeddingProvider, // Custom S3-compatible endpoint
+    pub model: String,
+    pub provider: String, // Custom S3-compatible endpoint
+}
+
+#[derive(Clone, Copy, Debug, Schema, Serialize, Deserialize)]
+pub enum EmbeddingProvider {
+    Ollama,
+    OpenAI,
+    Mock,
+}
+
+impl FromStr for EmbeddingProvider {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "ollama" => Ok(EmbeddingProvider::Ollama),
+            "openai" => Ok(EmbeddingProvider::OpenAI),
+            "mock" => Ok(EmbeddingProvider::Mock),
+            _ => Err(format!(
+                "Invalid embedding provider: {}. Valid options are: ollama, openai, mock",
+                s
+            )),
+        }
+    }
 }
 
 pub struct EmbeddingClient {
@@ -91,6 +116,15 @@ impl EmbeddingClient {
             provider,
             client,
         })
+    }
+
+    pub fn from(cfg: EmbeddingConfig) -> Result<Self> {
+        Self::new(
+            cfg.api_base,
+            cfg.api_key.get(),
+            cfg.model,
+            cfg.provider.parse().unwrap_or(EmbeddingProvider::Mock),
+        )
     }
 
     // Real embedding generation with HTTP calls using golem-wasi-http
@@ -232,40 +266,6 @@ impl EmbeddingClient {
         }
 
         embedding
-    }
-}
-
-#[derive(Clone, Copy, Debug, Schema, Serialize, Deserialize)]
-pub enum EmbeddingProvider {
-    Ollama,
-    OpenAI,
-    Mock,
-}
-
-impl EmbeddingClient {
-    pub fn from_env() -> Result<Self> {
-        let api_base = std::env::var("EMBEDDING_API_BASE")
-            .unwrap_or_else(|_| "http://localhost:11434".to_string());
-        let api_key = std::env::var("EMBEDDING_API_KEY").unwrap_or_else(|_| "ollama".to_string());
-        let model =
-            std::env::var("EMBEDDING_MODEL").unwrap_or_else(|_| "nomic-embed-text".to_string());
-
-        let provider_str =
-            std::env::var("EMBEDDING_PROVIDER").unwrap_or_else(|_| "ollama".to_string());
-        let provider = match provider_str.to_lowercase().as_str() {
-            "ollama" => EmbeddingProvider::Ollama,
-            "openai" => EmbeddingProvider::OpenAI,
-            "mock" => EmbeddingProvider::Mock,
-            _ => {
-                log::warn!(
-                    "Unknown EMBEDDING_PROVIDER '{}', defaulting to Ollama",
-                    provider_str
-                );
-                EmbeddingProvider::Ollama
-            }
-        };
-
-        Self::new(api_base, api_key, model, provider)
     }
 
     pub async fn generate_embedding_with_fallback(&self, text: &str) -> Result<Vec<f32>> {

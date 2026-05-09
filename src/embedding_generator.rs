@@ -1,12 +1,14 @@
-use crate::common_lib::database::{DatabaseHelper, PostgresDbConfig2};
+use crate::common_lib::database::{DatabaseHelper, PostgresDbConfig};
 use crate::common_lib::embedding_client::{EmbeddingClient, EmbeddingConfig};
 use crate::database_helper::DatabaseHelperRagext;
 use crate::models::*;
 use chrono::Utc;
 use futures::future;
-use golem_rust::{agent_definition, agent_implementation, description, endpoint, prompt, ConfigSchema};
-use std::string::String;
 use golem_rust::agentic::Config;
+use golem_rust::{
+    ConfigSchema, agent_definition, agent_implementation, description, endpoint, prompt,
+};
+use std::string::String;
 
 pub type AgentResult<T> = std::result::Result<T, ErrorResponse>;
 
@@ -15,7 +17,7 @@ pub struct EmbeddingAgentConfig {
     #[config_schema(nested)]
     pub embedding: EmbeddingConfig,
     #[config_schema(nested)]
-    pub db: PostgresDbConfig2,
+    pub db: PostgresDbConfig,
 }
 
 #[agent_definition(mount = "/embeddings", ephemeral)]
@@ -103,15 +105,13 @@ pub trait DocumentEmbeddingGeneratorAgent {
 }
 
 struct EmbeddingGeneratorAgentImpl {
-    config: Config<EmbeddingAgentConfig>
+    config: Config<EmbeddingAgentConfig>,
 }
 
 #[agent_implementation]
 impl EmbeddingGeneratorAgent for EmbeddingGeneratorAgentImpl {
     fn new(#[agent_config] config: Config<EmbeddingAgentConfig>) -> Self {
-        Self {
-            config
-        }
+        Self { config }
     }
 
     async fn generate_embeddings_for_documents(
@@ -192,7 +192,7 @@ impl EmbeddingGeneratorAgent for EmbeddingGeneratorAgentImpl {
 
     async fn get_documents_without_embeddings(&self) -> AgentResult<Vec<String>> {
         log::info!("Finding all documents without embeddings");
-        let db_helper = DatabaseHelper::from_env().map_err(|e| {
+        let db_helper = DatabaseHelper::from(self.config.get().db).map_err(|e| {
             ErrorResponse::from(format!("Failed to create database helper: {:?}", e))
         })?;
 
@@ -226,13 +226,13 @@ impl EmbeddingGeneratorAgent for EmbeddingGeneratorAgentImpl {
 struct DocumentEmbeddingGeneratorAgentImpl {
     embedding_client: EmbeddingClient,
     chunk_config: ChunkConfig,
-    config: Config<EmbeddingAgentConfig>
+    config: Config<EmbeddingAgentConfig>,
 }
 
 #[agent_implementation]
 impl DocumentEmbeddingGeneratorAgent for DocumentEmbeddingGeneratorAgentImpl {
     fn new(#[agent_config] config: Config<EmbeddingAgentConfig>) -> Self {
-        let embedding_client = EmbeddingClient::from_env()
+        let embedding_client = EmbeddingClient::from(config.get().embedding)
             .expect("Failed to create embedding client from environment");
 
         let chunk_config = ChunkConfig::default();
@@ -240,7 +240,7 @@ impl DocumentEmbeddingGeneratorAgent for DocumentEmbeddingGeneratorAgentImpl {
         Self {
             embedding_client,
             chunk_config,
-            config
+            config,
         }
     }
 
@@ -480,7 +480,7 @@ impl DocumentEmbeddingGeneratorAgentImpl {
     }
 
     fn create_db_helper(&self) -> AgentResult<DatabaseHelper> {
-        DatabaseHelper::from_env()
+        DatabaseHelper::from(self.config.get().db)
             .map_err(|e| ErrorResponse::from(format!("Failed to create database helper: {:?}", e)))
     }
 

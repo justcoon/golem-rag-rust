@@ -6,9 +6,8 @@ use hmac::{Hmac, Mac};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-
 #[derive(ConfigSchema)]
-pub struct S3Config2 {
+pub struct S3Config {
     #[config_schema(secret)]
     pub access_key_id: Secret<String>,
     #[config_schema(secret)]
@@ -17,26 +16,24 @@ pub struct S3Config2 {
     pub endpoint_url: Option<String>, // Custom S3-compatible endpoint
 }
 
-// S3 Document Source Types
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct S3Config {
-    pub access_key_id: String,
-    pub secret_access_key: String,
-    pub region: String,
-    pub endpoint_url: Option<String>, // Custom S3-compatible endpoint
+impl From<S3Config> for S3ClientConfig {
+    fn from(cfg: S3Config) -> Self {
+        Self {
+            access_key_id: cfg.access_key_id.get(),
+            secret_access_key: cfg.secret_access_key.get(),
+            region: cfg.region,
+            endpoint_url: cfg.endpoint_url,
+        }
+    }
 }
 
-impl S3Config {
-    pub fn from_env() -> Result<Self, String> {
-        Ok(Self {
-            access_key_id: std::env::var("AWS_ACCESS_KEY_ID")
-                .map_err(|_| "AWS_ACCESS_KEY_ID environment variable not set".to_string())?,
-            secret_access_key: std::env::var("AWS_SECRET_ACCESS_KEY")
-                .map_err(|_| "AWS_SECRET_ACCESS_KEY environment variable not set".to_string())?,
-            region: std::env::var("AWS_REGION").unwrap_or_else(|_| "us-east-1".to_string()),
-            endpoint_url: std::env::var("S3_ENDPOINT_URL").ok(),
-        })
-    }
+// S3 Document Source Types
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct S3ClientConfig {
+    access_key_id: String,
+    secret_access_key: String,
+    region: String,
+    endpoint_url: Option<String>, // Custom S3-compatible endpoint
 }
 
 #[derive(Clone, Debug, Schema, Serialize, Deserialize)]
@@ -104,13 +101,13 @@ pub type S3Result<T> = Result<T, S3Error>;
 // S3 Client Implementation
 #[derive(Clone, Debug)]
 pub struct S3Client {
-    config: S3Config,
+    config: S3ClientConfig,
     endpoint_url: String, // Fully qualified endpoint URL
     client: Client,
 }
 
 impl S3Client {
-    pub fn new(config: S3Config) -> S3Result<Self> {
+    pub fn new(config: S3ClientConfig) -> S3Result<Self> {
         let client = Client::builder()
             .timeout(std::time::Duration::from_secs(30))
             .build()
@@ -127,11 +124,6 @@ impl S3Client {
             endpoint_url,
             client,
         })
-    }
-
-    pub fn from_env() -> S3Result<Self> {
-        let config = S3Config::from_env().map_err(S3Error::InvalidRequest)?;
-        Self::new(config)
     }
 
     pub fn list_buckets(&self) -> S3Result<S3ListBucketsResponse> {
