@@ -1,15 +1,22 @@
-use crate::common_lib::database::{DatabaseHelper, DbValueEncoder, PostgresDbValue};
+use crate::common_lib::database::{DatabaseHelper, DbValueEncoder, PostgresDbConfig2, PostgresDbValue};
 use crate::database_helper::DatabaseHelperRagext;
 use crate::encode_params;
 use crate::models::*;
-use golem_rust::{agent_definition, agent_implementation, description, endpoint, prompt};
+use golem_rust::{agent_definition, agent_implementation, description, endpoint, prompt, ConfigSchema};
 use std::string::String;
+use golem_rust::agentic::Config;
 
 pub type AgentResult<T> = std::result::Result<T, ErrorResponse>;
 
+#[derive(ConfigSchema)]
+pub struct DocumentAgentConfig {
+    #[config_schema(nested)]
+    pub db: PostgresDbConfig2,
+}
+
 #[agent_definition(mount = "/documents", ephemeral)]
 pub trait DocumentAgent {
-    fn new() -> Self;
+    fn new(#[agent_config] config: Config<DocumentAgentConfig>) -> Self;
 
     /// Get a specific document by ID
     ///
@@ -85,12 +92,16 @@ pub trait DocumentAgent {
     fn document_exists(&self, document_id: String) -> AgentResult<bool>;
 }
 
-struct DocumentAgentImpl;
+struct DocumentAgentImpl {
+    config: Config<DocumentAgentConfig>
+}
 
 #[agent_implementation]
 impl DocumentAgent for DocumentAgentImpl {
-    fn new() -> Self {
-        Self
+    fn new(#[agent_config] config: Config<DocumentAgentConfig>) -> Self {
+        Self {
+            config
+        }
     }
 
     fn get_document(&self, document_id: String) -> AgentResult<Option<Document>> {

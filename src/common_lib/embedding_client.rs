@@ -1,5 +1,6 @@
 use anyhow::Result;
-use golem_rust::Schema;
+use golem_rust::{ConfigSchema, Schema};
+use golem_rust::agentic::Secret;
 use golem_wasi_http::{Client, Method};
 use serde::{Deserialize, Serialize};
 
@@ -53,6 +54,14 @@ pub struct OpenAIEmbeddingErrorDetail {
     pub message: String,
     pub type_: String,
     pub code: Option<String>,
+}
+
+#[derive(ConfigSchema)]
+pub struct EmbeddingConfig {
+    #[config_schema(secret)]
+    pub api_key: Secret<String>,
+    pub api_base: String,
+    pub provider: EmbeddingProvider, // Custom S3-compatible endpoint
 }
 
 pub struct EmbeddingClient {

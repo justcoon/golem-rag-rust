@@ -1,20 +1,29 @@
-use crate::common_lib::database::DatabaseHelper;
-use crate::common_lib::s3_client::S3Client;
+use crate::common_lib::database::{DatabaseHelper, PostgresDbConfig2};
+use crate::common_lib::s3_client::{S3Client, S3Config2};
 use crate::common_lib::s3_client::S3DocumentSource;
 use crate::database_helper::DatabaseHelperRagext;
 use crate::encode_params;
 use crate::models::*;
 use chrono::DateTime;
 
-use golem_rust::{agent_definition, agent_implementation, description, endpoint, prompt};
+use golem_rust::{agent_definition, agent_implementation, description, endpoint, prompt, ConfigSchema};
 use std::string::String;
+use golem_rust::agentic::Config;
 use uuid::Uuid;
 
 pub type AgentResult<T> = std::result::Result<T, ErrorResponse>;
 
+#[derive(ConfigSchema)]
+pub struct S3DocumentLoaderAgentConfig {
+    #[config_schema(nested)]
+    pub s3: S3Config2,
+    #[config_schema(nested)]
+    pub db: PostgresDbConfig2,
+}
+
 #[agent_definition(mount = "/s3", ephemeral)]
 pub trait S3DocumentLoaderAgent {
-    fn new() -> Self;
+    fn new(#[agent_config] config: Config<S3DocumentLoaderAgentConfig>) -> Self;
 
     /// Load documents from S3 using bucket and optional prefix
     ///
@@ -54,15 +63,16 @@ pub trait S3DocumentLoaderAgent {
 
 struct S3DocumentLoaderAgentImpl {
     s3_client: S3Client,
+    config: Config<S3DocumentLoaderAgentConfig>
 }
 
 #[agent_implementation]
 impl S3DocumentLoaderAgent for S3DocumentLoaderAgentImpl {
-    fn new() -> Self {
+    fn new(#[agent_config] config: Config<S3DocumentLoaderAgentConfig>) -> Self {
         let s3_client =
             S3Client::from_env().expect("Failed to initialize S3 client from environment");
 
-        Self { s3_client }
+        Self { s3_client, config }
     }
 
     fn load_documents(&self, bucket: String, prefix: Option<String>) -> AgentResult<Vec<String>> {

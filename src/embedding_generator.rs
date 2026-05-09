@@ -1,17 +1,26 @@
-use crate::common_lib::database::DatabaseHelper;
-use crate::common_lib::embedding_client::EmbeddingClient;
+use crate::common_lib::database::{DatabaseHelper, PostgresDbConfig2};
+use crate::common_lib::embedding_client::{EmbeddingClient, EmbeddingConfig};
 use crate::database_helper::DatabaseHelperRagext;
 use crate::models::*;
 use chrono::Utc;
 use futures::future;
-use golem_rust::{agent_definition, agent_implementation, description, endpoint, prompt};
+use golem_rust::{agent_definition, agent_implementation, description, endpoint, prompt, ConfigSchema};
 use std::string::String;
+use golem_rust::agentic::Config;
 
 pub type AgentResult<T> = std::result::Result<T, ErrorResponse>;
 
+#[derive(ConfigSchema)]
+pub struct EmbeddingAgentConfig {
+    #[config_schema(nested)]
+    pub embedding: EmbeddingConfig,
+    #[config_schema(nested)]
+    pub db: PostgresDbConfig2,
+}
+
 #[agent_definition(mount = "/embeddings", ephemeral)]
 pub trait EmbeddingGeneratorAgent {
-    fn new() -> Self;
+    fn new(#[agent_config] config: Config<EmbeddingAgentConfig>) -> Self;
 
     /// Generate embeddings for multiple documents
     ///
@@ -54,7 +63,7 @@ pub trait EmbeddingGeneratorAgent {
 
 #[agent_definition(mount = "/embeddings", ephemeral)]
 pub trait DocumentEmbeddingGeneratorAgent {
-    fn new() -> Self;
+    fn new(#[agent_config] config: Config<EmbeddingAgentConfig>) -> Self;
 
     /// Generate and store embeddings for a specific document
     ///
@@ -93,12 +102,16 @@ pub trait DocumentEmbeddingGeneratorAgent {
     async fn get_embedding_status(&self, document_id: String) -> AgentResult<EmbeddingStatus>;
 }
 
-struct EmbeddingGeneratorAgentImpl;
+struct EmbeddingGeneratorAgentImpl {
+    config: Config<EmbeddingAgentConfig>
+}
 
 #[agent_implementation]
 impl EmbeddingGeneratorAgent for EmbeddingGeneratorAgentImpl {
-    fn new() -> Self {
-        Self
+    fn new(#[agent_config] config: Config<EmbeddingAgentConfig>) -> Self {
+        Self {
+            config
+        }
     }
 
     async fn generate_embeddings_for_documents(
@@ -213,11 +226,12 @@ impl EmbeddingGeneratorAgent for EmbeddingGeneratorAgentImpl {
 struct DocumentEmbeddingGeneratorAgentImpl {
     embedding_client: EmbeddingClient,
     chunk_config: ChunkConfig,
+    config: Config<EmbeddingAgentConfig>
 }
 
 #[agent_implementation]
 impl DocumentEmbeddingGeneratorAgent for DocumentEmbeddingGeneratorAgentImpl {
-    fn new() -> Self {
+    fn new(#[agent_config] config: Config<EmbeddingAgentConfig>) -> Self {
         let embedding_client = EmbeddingClient::from_env()
             .expect("Failed to create embedding client from environment");
 
@@ -226,6 +240,7 @@ impl DocumentEmbeddingGeneratorAgent for DocumentEmbeddingGeneratorAgentImpl {
         Self {
             embedding_client,
             chunk_config,
+            config
         }
     }
 

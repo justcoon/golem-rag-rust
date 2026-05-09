@@ -1,15 +1,25 @@
-use crate::common_lib::database::DatabaseHelper;
-use crate::common_lib::embedding_client::EmbeddingClient;
+use crate::common_lib::database::{DatabaseHelper, PostgresDbConfig2};
+use crate::common_lib::embedding_client::{EmbeddingClient, EmbeddingConfig};
 use crate::encode_params;
 use crate::models::*;
-use golem_rust::{agent_definition, agent_implementation, description, endpoint, prompt};
+use golem_rust::{agent_definition, agent_implementation, description, endpoint, prompt, ConfigSchema};
 use std::string::String;
+use golem_rust::agentic::Config;
 
 pub type AgentResult<T> = std::result::Result<T, ErrorResponse>;
 
+
+#[derive(ConfigSchema)]
+pub struct SearchAgentConfig {
+    #[config_schema(nested)]
+    pub embedding: EmbeddingConfig,
+    #[config_schema(nested)]
+    pub db: PostgresDbConfig2,
+}
+
 #[agent_definition(mount = "/search", ephemeral)]
 pub trait SearchAgent {
-    fn new() -> Self;
+    fn new(#[agent_config] config: Config<SearchAgentConfig>) -> Self;
 
     /// Get similar documents to a specific document
     #[prompt("Find similar documents")]
@@ -49,12 +59,16 @@ pub trait SearchAgent {
     ) -> AgentResult<Vec<HybridSearchResult>>;
 }
 
-struct SearchAgentImpl;
+struct SearchAgentImpl {
+    config: Config<SearchAgentConfig>,
+}
 
 #[agent_implementation]
 impl SearchAgent for SearchAgentImpl {
-    fn new() -> Self {
-        Self
+    fn new(#[agent_config] config: Config<SearchAgentConfig>) -> Self {
+        Self {
+            config
+        }
     }
 
     async fn find_similar_documents(
