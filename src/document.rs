@@ -1,15 +1,26 @@
-use crate::common_lib::database::{DatabaseHelper, DbValueEncoder, PostgresDbValue};
+use crate::common_lib::database::{
+    DatabaseHelper, DbValueEncoder, PostgresDbConfig, PostgresDbValue,
+};
 use crate::database_helper::DatabaseHelperRagext;
 use crate::encode_params;
 use crate::models::*;
-use golem_rust::{agent_definition, agent_implementation, description, endpoint, prompt};
+use golem_rust::agentic::Config;
+use golem_rust::{
+    ConfigSchema, agent_definition, agent_implementation, description, endpoint, prompt,
+};
 use std::string::String;
 
 pub type AgentResult<T> = std::result::Result<T, ErrorResponse>;
 
+#[derive(ConfigSchema)]
+pub struct DocumentAgentConfig {
+    #[config_schema(nested)]
+    pub db: PostgresDbConfig,
+}
+
 #[agent_definition(mount = "/documents", ephemeral)]
 pub trait DocumentAgent {
-    fn new() -> Self;
+    fn new(#[agent_config] config: Config<DocumentAgentConfig>) -> Self;
 
     /// Get a specific document by ID
     ///
@@ -85,16 +96,18 @@ pub trait DocumentAgent {
     fn document_exists(&self, document_id: String) -> AgentResult<bool>;
 }
 
-struct DocumentAgentImpl;
+struct DocumentAgentImpl {
+    config: Config<DocumentAgentConfig>,
+}
 
 #[agent_implementation]
 impl DocumentAgent for DocumentAgentImpl {
-    fn new() -> Self {
-        Self
+    fn new(#[agent_config] config: Config<DocumentAgentConfig>) -> Self {
+        Self { config }
     }
 
     fn get_document(&self, document_id: String) -> AgentResult<Option<Document>> {
-        let db_helper = DatabaseHelper::from_env()
+        let db_helper = DatabaseHelper::from(self.config.get().db)
             .map_err(|e| format!("Failed to create database helper: {:?}", e))?;
 
         db_helper
@@ -112,7 +125,7 @@ impl DocumentAgent for DocumentAgentImpl {
         filters: Option<DocumentFilters>,
         limit: Option<usize>,
     ) -> AgentResult<Vec<Document>> {
-        let db_helper = DatabaseHelper::from_env()
+        let db_helper = DatabaseHelper::from(self.config.get().db)
             .map_err(|e| format!("Failed to create database helper: {:?}", e))?;
 
         // Build query with filters
@@ -132,7 +145,7 @@ impl DocumentAgent for DocumentAgentImpl {
     }
 
     fn get_document_chunks(&self, document_id: String) -> AgentResult<Vec<DocumentChunk>> {
-        let db_helper = DatabaseHelper::from_env()
+        let db_helper = DatabaseHelper::from(self.config.get().db)
             .map_err(|e| format!("Failed to create database helper: {:?}", e))?;
 
         let query = r#"
@@ -153,7 +166,7 @@ impl DocumentAgent for DocumentAgentImpl {
     }
 
     fn document_exists(&self, document_id: String) -> AgentResult<bool> {
-        let db_helper = DatabaseHelper::from_env()
+        let db_helper = DatabaseHelper::from(self.config.get().db)
             .map_err(|e| format!("Failed to create database helper: {:?}", e))?;
 
         db_helper.document_exists(&document_id).map_err(|e| {

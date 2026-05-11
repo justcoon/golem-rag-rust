@@ -1,6 +1,6 @@
 use anyhow::Result;
-use golem_rust::Schema;
-use serde::{Deserialize, Serialize};
+use golem_rust::ConfigSchema;
+use golem_rust::agentic::Secret;
 
 // Re-export Golem RDBMS types for convenience
 pub use golem_rust::bindings::golem::rdbms::postgres::{
@@ -602,35 +602,24 @@ macro_rules! encode_params {
     };
 }
 
-#[derive(Clone, Debug, Schema, Serialize, Deserialize)]
+#[derive(ConfigSchema)]
 pub struct PostgresDbConfig {
     pub host: String,
     pub db: String,
-    pub user: String,
-    pub password: String,
+    #[config_schema(secret)]
+    pub user: Secret<String>,
+    #[config_schema(secret)]
+    pub password: Secret<String>,
     pub port: String,
 }
 
 impl PostgresDbConfig {
-    pub fn from_env() -> Result<Self> {
-        Ok(Self {
-            host: std::env::var("POSTGRES_HOST")
-                .map_err(|_| anyhow::anyhow!("POSTGRES_HOST environment variable not set"))?,
-            db: std::env::var("POSTGRES_DB")
-                .map_err(|_| anyhow::anyhow!("POSTGRES_DB environment variable not set"))?,
-            user: std::env::var("POSTGRES_USER")
-                .map_err(|_| anyhow::anyhow!("POSTGRES_USER environment variable not set"))?,
-            password: std::env::var("POSTGRES_PASSWORD")
-                .map_err(|_| anyhow::anyhow!("POSTGRES_PASSWORD environment variable not set"))?,
-            port: std::env::var("POSTGRES_PORT")
-                .map_err(|_| anyhow::anyhow!("POSTGRES_PORT environment variable not set"))?,
-        })
-    }
-
-    pub fn db_url(&self) -> String {
+    fn db_url(&self) -> String {
+        let u = self.user.get();
+        let p = self.password.get();
         format!(
             "postgresql://{}:{}@{}:{}/{}",
-            self.user, self.password, self.host, self.port, self.db
+            u, p, self.host, self.port, self.db
         )
     }
 }
@@ -640,14 +629,13 @@ pub struct DatabaseHelper {
 }
 
 impl DatabaseHelper {
+    pub fn from(cfg: PostgresDbConfig) -> Result<Self> {
+        Self::new(&cfg.db_url())
+    }
+
     pub fn new(url: &str) -> Result<Self> {
         let connection = PostgresDbConnection::open(url)?;
         Ok(Self { connection })
-    }
-
-    pub fn from_env() -> Result<Self> {
-        let config = PostgresDbConfig::from_env()?;
-        Self::new(&config.db_url())
     }
 
     /// Execute a function within a database transaction
