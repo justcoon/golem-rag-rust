@@ -22,6 +22,18 @@ At the center of this ecosystem are several key agents:
 - **EmbeddingGeneratorAgent**: Communicates with external providers to turn text into vectors.
 - **DocumentEmbeddingGeneratorAgent**: Specialized worker for managing the chunking and embedding flow of individual documents.
 
+### How Agents Collaborate
+
+One of the most powerful features of Golem is how these agents work together. Instead of one giant service trying to do everything, the system is a small society of specialized workers.
+
+The synchronization flow is a perfect example of this collaboration:
+1. The **S3DocumentSyncAgent** acts as the orchestrator. When it's time to sync, it asks the **S3DocumentLoaderAgent** for a list of buckets.
+2. For each bucket, the Sync agent triggers a parallel process. It doesn't do the work itself; instead, it delegates.
+3. The **S3DocumentLoaderAgent** pulls document contents from S3 and stores them via the **DocumentAgent**.
+4. Once the documents are ready, the **EmbeddingGeneratorAgent** takes over. To handle high volume, it spins up multiple **DocumentEmbeddingGeneratorAgent** instances—one for each document.
+
+This delegation is done using **Phantom Agents**. In Golem, you can create a "phantom" instance of an agent that has its own isolated state and lifecycle. This allows us to process hundreds of documents in parallel without blocking the main sync process. If one document fails to embed because of a network glitch, Golem's durability ensures that *only* that specific agent retries, while the rest of the system moves forward.
+
 These agents interact with a few critical external services to keep the data flowing. We use **PostgreSQL** with the pgvector extension to store both the structured metadata and the high-dimensional embeddings. The source documents themselves live in **Amazon S3**, which acts as our primary document store. Finally, we rely on an **Embedding API** (such as OpenAI) to handle the heavy mathematical lifting of vector generation.
 
 One of the most interesting parts is how easy it is to define these agents in Rust. Here is a look at the trait definition for the SearchAgent:
@@ -50,7 +62,7 @@ pub trait SearchAgent {
 }
 ```
 
-The SearchAgent is marked as ephemeral because it doesn't need to hold onto state between calls—it just performs hybrid search combining vector similarity and keyword matching. But other agents in the system are very much stateful.
+The SearchAgent is marked as ephemeral because it doesn't need to hold onto state between calls—it just performs hybrid search combining vector similarity and keyword matching. In fact, most agents in this system follow this request-response pattern, with the **S3DocumentSyncAgent** being the primary stateful component that manages its own history and scheduling.
 
 ### Handling Long-Running Tasks
 
@@ -82,6 +94,8 @@ This snippet shows how the agent schedules its own next execution. Because the a
 
 ### Parallelism and Scale
 
-Even though each agent execution is single-threaded to keep state management simple, the system scales by spinning up "phantom agents" for parallel work. When the sync agent needs to process multiple S3 buckets, it doesn't do them one by one. It triggers parallel executions across different agent instances, allowing the system to handle large datasets efficiently while maintaining the simplicity of the agent model.
+This architecture naturally leads to a "one agent per entity" philosophy. Instead of a single worker processing a queue of documents, we have an agent for each document. 
+
+Even though each agent execution is single-threaded to keep state management simple, the system scales by leveraging the phantom agent mechanism we discussed. By fanning out work to individual agent instances, we achieve massive parallelism while each piece of code remains dead simple—no locks, no mutexes, and no complex concurrency primitives. We just let Golem handle the distribution and durability.
 
 Building RAG this way feels different. You aren't just writing functions that talk to a database; you're designing a small ecosystem of workers that are guaranteed to finish their jobs. It removes a huge layer of boilerplate related to reliability and state recovery, letting you focus on the actual logic of retrieval and generation.
