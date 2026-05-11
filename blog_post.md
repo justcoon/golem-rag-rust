@@ -36,12 +36,28 @@ This delegation is done using **Phantom Agents**. In Golem, you can create a "ph
 
 These agents interact with a few critical external services to keep the data flowing. We use **PostgreSQL** with the pgvector extension to store both the structured metadata and the high-dimensional embeddings. The source documents themselves live in **Amazon S3**, which acts as our primary document store. Finally, we rely on an **Embedding API** (such as OpenAI) to handle the heavy mathematical lifting of vector generation.
 
+### Out-of-the-Box Features: Endpoints, Config, and Secrets
+
+One of the biggest hurdles in microservice development is the "glue code"—handling HTTP routing, parsing configuration files, and managing secrets. Golem handles this out of the box with a few simple annotations:
+
+*   **HTTP Endpoints**: You don't need a separate web framework like Axum or Actix. By adding `#[endpoint]` annotations to your agent traits, Golem automatically exposes them as REST APIs. The `mount` attribute at the trait level defines the base path, making your agents reachable by any HTTP client.
+*   **Typed Configuration**: Agents can receive structured configuration via `#[agent_config]`. You define a standard Rust struct with the `ConfigSchema` derive, and Golem ensures the values are correctly injected and validated at runtime.
+*   **Secure Secrets**: For sensitive data like OpenAI API keys or database passwords, Golem provides a dedicated `Secret<T>` type. These are marked with `#[config_schema(secret)]`, ensuring they are handled securely, kept out of persistent logs, and never checked into source control. You manage them through the CLI or environment-specific secret stores.
+
 One of the most interesting parts is how easy it is to define these agents in Rust. Here is a look at the trait definition for the SearchAgent:
 
 ```rust
+#[derive(ConfigSchema)]
+pub struct SearchAgentConfig {
+    #[config_schema(nested)]
+    pub embedding: EmbeddingConfig,
+    #[config_schema(nested)]
+    pub db: PostgresDbConfig,
+}
+
 #[agent_definition(mount = "/search", ephemeral)]
 pub trait SearchAgent {
-    fn new() -> Self;
+    fn new(#[agent_config] config: Config<SearchAgentConfig>) -> Self;
 
     #[endpoint(post = "/similar")]
     async fn find_similar_documents(
