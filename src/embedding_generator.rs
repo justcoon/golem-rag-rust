@@ -224,7 +224,6 @@ impl EmbeddingGeneratorAgent for EmbeddingGeneratorAgentImpl {
 }
 
 struct DocumentEmbeddingGeneratorAgentImpl {
-    embedding_client: EmbeddingClient,
     chunk_config: ChunkConfig,
     config: Config<EmbeddingAgentConfig>,
 }
@@ -232,13 +231,9 @@ struct DocumentEmbeddingGeneratorAgentImpl {
 #[agent_implementation]
 impl DocumentEmbeddingGeneratorAgent for DocumentEmbeddingGeneratorAgentImpl {
     fn new(#[agent_config] config: Config<EmbeddingAgentConfig>) -> Self {
-        let embedding_client = EmbeddingClient::from(config.get().embedding)
-            .expect("Failed to create embedding client from environment");
-
         let chunk_config = ChunkConfig::default();
 
         Self {
-            embedding_client,
             chunk_config,
             config,
         }
@@ -442,8 +437,11 @@ impl DocumentEmbeddingGeneratorAgentImpl {
             "Generating embedding for chunk: {}",
             &chunk.content[..chunk.content.len().min(100)]
         );
-        let embedding_vector = self
-            .embedding_client
+
+        let embedding_client = EmbeddingClient::from(self.config.get().embedding)
+            .map_err(|e| format!("Failed to create embedding client: {:?}", e))?;
+
+        let embedding_vector = embedding_client
             .generate_embedding_with_fallback(&chunk.content)
             .await
             .map_err(|e| format!("Failed to generate embedding: {:?}", e))?;
@@ -476,7 +474,7 @@ impl DocumentEmbeddingGeneratorAgentImpl {
     }
 
     fn get_model_name(&self) -> String {
-        self.embedding_client.model.clone()
+        self.config.get().embedding.model.clone()
     }
 
     fn create_db_helper(&self) -> AgentResult<DatabaseHelper> {
