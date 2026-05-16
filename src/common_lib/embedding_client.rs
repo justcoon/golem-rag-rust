@@ -1,64 +1,13 @@
 use anyhow::Result;
+use golem_ai_embed::EmbeddingProvider;
 use golem_ai_embed::config::SecretSource;
 use golem_ai_embed::model::{Config, ContentPart};
 use golem_ai_embed_openai::{DurableOpenAI, OpenAiEmbedConfig};
+use golem_rust::ConfigSchema;
 use golem_rust::agentic::Secret;
-use golem_rust::{ConfigSchema, Schema};
-use golem_wasi_http::{Client, Method};
-use serde::{Deserialize, Serialize};
-use std::str::FromStr;
 
 /// Default embedding dimension for mock embeddings
 pub const DEFAULT_EMBEDDING_DIMENSION: usize = 768;
-
-#[derive(Clone, Debug, Schema, Serialize, Deserialize)]
-pub struct EmbeddingRequest {
-    pub model: String,
-    pub input: String,
-}
-
-#[derive(Clone, Debug, Schema, Serialize, Deserialize)]
-pub struct EmbeddingResponse {
-    pub object: String,
-    pub embedding: Vec<f32>,
-    pub index: u32,
-}
-
-#[derive(Clone, Debug, Schema, Serialize, Deserialize)]
-pub struct EmbeddingUsage {
-    pub prompt_tokens: u32,
-    pub total_tokens: u32,
-}
-
-#[derive(Clone, Debug, Schema, Serialize, Deserialize)]
-pub struct EmbeddingData {
-    pub data: Vec<EmbeddingResponse>,
-    pub model: String,
-    pub usage: EmbeddingUsage,
-}
-
-#[derive(Clone, Debug, Schema, Serialize, Deserialize)]
-pub struct OllamaEmbeddingRequest {
-    pub model: String,
-    pub prompt: String,
-}
-
-#[derive(Clone, Debug, Schema, Serialize, Deserialize)]
-pub struct OllamaEmbeddingResponse {
-    pub embedding: Vec<f32>,
-}
-
-#[derive(Clone, Debug, Schema, Serialize, Deserialize)]
-pub struct OpenAIEmbeddingError {
-    pub error: OpenAIEmbeddingErrorDetail,
-}
-
-#[derive(Clone, Debug, Schema, Serialize, Deserialize)]
-pub struct OpenAIEmbeddingErrorDetail {
-    pub message: String,
-    pub type_: String,
-    pub code: Option<String>,
-}
 
 #[derive(ConfigSchema)]
 pub struct EmbeddingConfig {
@@ -66,234 +15,14 @@ pub struct EmbeddingConfig {
     pub api_key: Secret<String>,
     pub api_base: String,
     pub model: String,
-    pub provider: String,
-}
-
-#[derive(Clone, Copy, Debug, Schema, Serialize, Deserialize)]
-pub enum EmbeddingProvider {
-    Ollama,
-    OpenAI,
-    Mock,
-}
-
-impl FromStr for EmbeddingProvider {
-    type Err = String;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s.to_lowercase().as_str() {
-            "ollama" => Ok(EmbeddingProvider::Ollama),
-            "openai" => Ok(EmbeddingProvider::OpenAI),
-            "mock" => Ok(EmbeddingProvider::Mock),
-            _ => Err(format!(
-                "Invalid embedding provider: {}. Valid options are: ollama, openai, mock",
-                s
-            )),
-        }
-    }
 }
 
 pub struct EmbeddingClient {
-    pub model: String,
-    pub provider: EmbeddingProvider,
-    api_base: String,
-    api_key: String,
-    client: Client,
-}
-
-impl EmbeddingClient {
-    pub fn new(
-        api_base: String,
-        api_key: String,
-        model: String,
-        provider: EmbeddingProvider,
-    ) -> Result<Self> {
-        let client = Client::builder()
-            .timeout(std::time::Duration::from_secs(30))
-            .build()
-            .map_err(|e| anyhow::anyhow!("Failed to create HTTP client: {:?}", e))?;
-
-        Ok(Self {
-            api_base,
-            api_key,
-            model,
-            provider,
-            client,
-        })
-    }
-
-    pub fn from(cfg: EmbeddingConfig) -> Result<Self> {
-        Self::new(
-            cfg.api_base,
-            cfg.api_key.get(),
-            cfg.model,
-            cfg.provider.parse().unwrap_or(EmbeddingProvider::Mock),
-        )
-    }
-
-    // Real embedding generation with HTTP calls using golem-wasi-http
-    pub async fn generate_embedding(&self, text: &str) -> Result<Vec<f32>> {
-        log::info!("Generating embedding for text: {}", text);
-
-        match self.provider {
-            EmbeddingProvider::Ollama => self.generate_ollama_embedding(text).await,
-            EmbeddingProvider::OpenAI => self.generate_openai_embedding(text).await,
-            EmbeddingProvider::Mock => Ok(Self::mock_embedding(text, DEFAULT_EMBEDDING_DIMENSION)),
-        }
-    }
-
-    // Real Ollama embedding generation using golem-wasi-http (following S3 pattern)
-    async fn generate_ollama_embedding(&self, text: &str) -> Result<Vec<f32>> {
-        let request = OllamaEmbeddingRequest {
-            model: self.model.clone(),
-            prompt: text.to_string(),
-        };
-
-        let url = format!("{}/api/embeddings", self.api_base);
-        let body = serde_json::to_string(&request)?;
-
-        log::debug!("Making Ollama request to: {}", url);
-
-        let response = self
-            .client
-            .request(Method::POST, &url)
-            .header("Content-Type", "application/json")
-            .body(body)
-            .send()
-            .map_err(|e| anyhow::anyhow!("Failed to send Ollama request: {:?}", e))?;
-
-        let status = response.status();
-        if status.is_success() {
-            let response_body = response
-                .text()
-                .map_err(|e| anyhow::anyhow!("Failed to read Ollama response: {:?}", e))?;
-
-            let embedding_response: OllamaEmbeddingResponse = serde_json::from_str(&response_body)
-                .map_err(|e| anyhow::anyhow!("Failed to parse Ollama response: {}", e))?;
-
-            log::debug!(
-                "Generated Ollama embedding with {} dimensions",
-                embedding_response.embedding.len()
-            );
-            Ok(embedding_response.embedding)
-        } else {
-            let error_body = response
-                .text()
-                .map_err(|e| anyhow::anyhow!("Failed to read error response: {:?}", e))?;
-
-            Err(anyhow::anyhow!(
-                "Ollama API error: {} - {}",
-                status,
-                error_body
-            ))
-        }
-    }
-
-    // Real OpenAI embedding generation using golem-wasi-http (following S3 pattern)
-    async fn generate_openai_embedding(&self, text: &str) -> Result<Vec<f32>> {
-        let request = EmbeddingRequest {
-            model: self.model.clone(),
-            input: text.to_string(),
-        };
-
-        let url = format!("{}/embeddings", self.api_base);
-        let body = serde_json::to_string(&request)?;
-
-        log::debug!("Making OpenAI request to: {}", url);
-
-        let response = self
-            .client
-            .request(Method::POST, &url)
-            .header("Content-Type", "application/json")
-            .header("Authorization", format!("Bearer {}", self.api_key))
-            .body(body)
-            .send()
-            .map_err(|e| anyhow::anyhow!("Failed to send OpenAI request: {:?}", e))?;
-
-        let status = response.status();
-        if status.is_success() {
-            let response_body = response
-                .text()
-                .map_err(|e| anyhow::anyhow!("Failed to read OpenAI response: {:?}", e))?;
-
-            let embedding_data: EmbeddingData = serde_json::from_str(&response_body)
-                .map_err(|e| anyhow::anyhow!("Failed to parse OpenAI response: {}", e))?;
-
-            if embedding_data.data.is_empty() {
-                return Err(anyhow::anyhow!("No embeddings returned from API"));
-            }
-
-            log::debug!(
-                "Generated OpenAI embedding with {} dimensions",
-                embedding_data.data[0].embedding.len()
-            );
-            Ok(embedding_data.data[0].embedding.clone())
-        } else {
-            let error_body = response
-                .text()
-                .map_err(|e| anyhow::anyhow!("Failed to read error response: {:?}", e))?;
-
-            // Try to parse OpenAI error format
-            if let Ok(error_response) = serde_json::from_str::<OpenAIEmbeddingError>(&error_body) {
-                Err(anyhow::anyhow!(
-                    "OpenAI API error: {} - {}",
-                    status,
-                    error_response.error.message
-                ))
-            } else {
-                Err(anyhow::anyhow!(
-                    "OpenAI API error: {} - {}",
-                    status,
-                    error_body
-                ))
-            }
-        }
-    }
-
-    // Fallback mock embedding for testing
-    pub fn mock_embedding(text: &str, dimension: usize) -> Vec<f32> {
-        let mut embedding = Vec::with_capacity(dimension);
-        let mut hasher = std::collections::hash_map::DefaultHasher::new();
-        use std::hash::{Hash, Hasher};
-        text.hash(&mut hasher);
-        let seed = hasher.finish();
-
-        for i in 0..dimension {
-            let value = ((seed >> (i % 64)) & 0xFF) as f32;
-            embedding.push((value - 128.0) / 128.0);
-        }
-
-        // Normalize the embedding
-        let norm = embedding.iter().map(|x| x * x).sum::<f32>().sqrt();
-        if norm > 0.0 {
-            embedding.iter_mut().for_each(|x| *x /= norm);
-        }
-
-        embedding
-    }
-
-    pub async fn generate_embedding_with_fallback(&self, text: &str) -> Result<Vec<f32>> {
-        match self.provider {
-            EmbeddingProvider::Ollama | EmbeddingProvider::OpenAI => {
-                match self.generate_embedding(text).await {
-                    Ok(embedding) => Ok(embedding),
-                    Err(e) => {
-                        log::warn!("Embedding generation failed, using mock: {:?}", e);
-                        Ok(Self::mock_embedding(text, DEFAULT_EMBEDDING_DIMENSION))
-                        // Common embedding dimension
-                    }
-                }
-            }
-            EmbeddingProvider::Mock => Ok(Self::mock_embedding(text, DEFAULT_EMBEDDING_DIMENSION)),
-        }
-    }
-}
-
-pub struct EmbeddingClient2 {
     model: String,
     config: OpenAiEmbedConfig,
 }
 
-impl EmbeddingClient2 {
+impl EmbeddingClient {
     pub fn new(config: EmbeddingConfig) -> Result<Self> {
         let openai_config = OpenAiEmbedConfig {
             api_key: SecretSource::from_handle(config.api_key),
@@ -318,7 +47,6 @@ impl EmbeddingClient2 {
             user: None,
             provider_options: vec![],
         };
-        use golem_ai_embed::EmbeddingProvider;
         let response = DurableOpenAI::generate(self.config.clone(), inputs, config)
             .map_err(|e| anyhow::anyhow!("Embedding generation failed: {}", e))?;
 

@@ -1,5 +1,5 @@
 use crate::common_lib::database::{DatabaseHelper, PostgresDbConfig};
-use crate::common_lib::embedding_client::{EmbeddingClient2, EmbeddingConfig};
+use crate::common_lib::embedding_client::{EmbeddingClient, EmbeddingConfig};
 use crate::database_helper::DatabaseHelperRagext;
 use crate::models::*;
 use chrono::Utc;
@@ -426,7 +426,7 @@ impl DocumentEmbeddingGeneratorAgentImpl {
             &chunk.content[..chunk.content.len().min(100)]
         );
 
-        let embedding_client = EmbeddingClient2::new(self.config.get().embedding)
+        let embedding_client = EmbeddingClient::new(self.config.get().embedding)
             .map_err(|e| format!("Failed to create embedding client: {:?}", e))?;
 
         let embedding_vector = embedding_client

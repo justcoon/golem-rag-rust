@@ -30,7 +30,6 @@ components:
         region: "{{ AWS_DEFAULT_REGION }}"
         endpoint_url: "{{ S3_ENDPOINT_URL }}"
       embedding:
-        provider: "{{ EMBEDDING_PROVIDER }}"
         api_base: "{{ EMBEDDING_API_BASE }}"
         model: "{{ EMBEDDING_MODEL }}"
 
