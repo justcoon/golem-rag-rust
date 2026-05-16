@@ -1,4 +1,7 @@
 use anyhow::Result;
+use golem_ai_embed::config::SecretSource;
+use golem_ai_embed::model::{Config, ContentPart};
+use golem_ai_embed_openai::{DurableOpenAI, OpenAiEmbedConfig};
 use golem_rust::agentic::Secret;
 use golem_rust::{ConfigSchema, Schema};
 use golem_wasi_http::{Client, Method};
@@ -63,7 +66,7 @@ pub struct EmbeddingConfig {
     pub api_key: Secret<String>,
     pub api_base: String,
     pub model: String,
-    pub provider: String, // Custom S3-compatible endpoint
+    pub provider: String,
 }
 
 #[derive(Clone, Copy, Debug, Schema, Serialize, Deserialize)]
@@ -281,6 +284,51 @@ impl EmbeddingClient {
                 }
             }
             EmbeddingProvider::Mock => Ok(Self::mock_embedding(text, DEFAULT_EMBEDDING_DIMENSION)),
+        }
+    }
+}
+
+pub struct EmbeddingClient2 {
+    model: String,
+    config: OpenAiEmbedConfig,
+}
+
+impl EmbeddingClient2 {
+    pub fn new(config: EmbeddingConfig) -> Result<Self> {
+        let openai_config = OpenAiEmbedConfig {
+            api_key: SecretSource::from_handle(config.api_key),
+            base_url: Some(config.api_base),
+        };
+
+        Ok(Self {
+            model: config.model,
+            config: openai_config,
+        })
+    }
+
+    pub async fn generate_embedding(&self, text: &str) -> Result<Vec<f32>> {
+        let inputs = vec![ContentPart::Text(text.to_string())];
+        let config = Config {
+            model: Some(self.model.clone()),
+            task_type: None,
+            dimensions: Some(DEFAULT_EMBEDDING_DIMENSION as u32),
+            truncation: None,
+            output_format: None,
+            output_dtype: None,
+            user: None,
+            provider_options: vec![],
+        };
+        use golem_ai_embed::EmbeddingProvider;
+        let response = DurableOpenAI::generate(self.config.clone(), inputs, config)
+            .map_err(|e| anyhow::anyhow!("Embedding generation failed: {}", e))?;
+
+        if response.embeddings.is_empty() {
+            return Err(anyhow::anyhow!("No embeddings returned"));
+        }
+
+        match &response.embeddings[0].vector {
+            golem_ai_embed::model::VectorData::Float(vec) => Ok(vec.clone()),
+            _ => Err(anyhow::anyhow!("Unexpected vector type")),
         }
     }
 }

@@ -365,6 +365,36 @@ dependencies = [
 ]
 
 [[package]]
+name = "golem-ai-embed"
+version = "0.5.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "41d5720cb1ac855eb3f70696fbfa124bd8439d12465f044698637d333da30a24"
+dependencies = [
+ "golem-rust",
+ "golem-wasi-http",
+ "log",
+ "mime",
+ "nom",
+ "thiserror",
+ "wasi-logger",
+]
+
+[[package]]
+name = "golem-ai-embed-openai"
+version = "0.5.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c6b11cb026eb8e46722894aaeb65e601e822f8815d02728dd9d698a61bef6473"
+dependencies = [
+ "base64",
+ "golem-ai-embed",
+ "golem-rust",
+ "golem-wasi-http",
+ "log",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "golem-rust"
 version = "2.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -440,6 +470,8 @@ dependencies = [
  "anyhow",
  "chrono",
  "futures",
+ "golem-ai-embed",
+ "golem-ai-embed-openai",
  "golem-rust",
  "golem-wasi-http",
  "hex",
@@ -768,6 +800,22 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6877bb514081ee2a7ff5ef9de3281f14a4dd4bceac4c09388074a6b5df8a139a"
 
 [[package]]
+name = "minimal-lexical"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "68354c5c6bd36d73ff3feceb05efa59b6acb7626617f4962be322a825e61f79a"
+
+[[package]]
+name = "nom"
+version = "7.1.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d273983c5a657a70a3e8f2a01329822f3b8c8172b73826411a55751e404a0a4a"
+dependencies = [
+ "memchr",
+ "minimal-lexical",
+]
+
+[[package]]
 name = "num-traits"
 version = "0.2.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -997,6 +1045,26 @@ name = "synstructure"
 version = "0.13.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "728a70f3dbaf5bab7f0c4b1ac8d7ae5ea60a4b5549c8a5914361c99147a709d2"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
+name = "thiserror"
+version = "2.0.18"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4288b5bcbc7920c07a1149a35cf9590a2aa808e0bc1eafaade0b80947865fbc4"
+dependencies = [
+ "thiserror-impl",
+]
+
+[[package]]
+name = "thiserror-impl"
+version = "2.0.18"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ebc4ee7f67670e9b64d05fa4253e753e016c6c95ff35b89b7941d6b856dec1d5"
 dependencies = [
  "proc-macro2",
  "quote",

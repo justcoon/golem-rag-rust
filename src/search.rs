@@ -1,5 +1,5 @@
 use crate::common_lib::database::{DatabaseHelper, PostgresDbConfig};
-use crate::common_lib::embedding_client::{EmbeddingClient, EmbeddingConfig};
+use crate::common_lib::embedding_client::{EmbeddingClient2, EmbeddingConfig};
 use crate::encode_params;
 use crate::models::*;
 use golem_rust::agentic::Config;
@@ -157,19 +157,13 @@ impl SearchAgent for SearchAgentImpl {
 
 impl SearchAgentImpl {
     async fn generate_query_embedding(&self, query: &str) -> AgentResult<Vec<f32>> {
-        let embedding_client = EmbeddingClient::from(self.config.get().embedding)
+        let embedding_client = EmbeddingClient2::new(self.config.get().embedding)
             .map_err(|e| format!("Failed to create embedding client: {:?}", e))?;
 
-        match embedding_client
-            .generate_embedding_with_fallback(query)
-            .await
-        {
+        match embedding_client.generate_embedding(query).await {
             Ok(embedding) => Ok(embedding),
             Err(e) => {
-                log::error!(
-                    "Failed to generate query embedding even with fallback: {:?}",
-                    e
-                );
+                log::error!("Failed to generate query embedding: {:?}", e);
                 Err(format!("Failed to generate query embedding: {:?}", e).into())
             }
         }
