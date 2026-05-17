@@ -63,14 +63,11 @@ pub trait EmbeddingGeneratorAgent {
     async fn get_documents_without_embeddings(&self) -> AgentResult<Vec<String>>;
 }
 
-#[agent_definition(mount = "/embeddings", ephemeral)]
+#[agent_definition(mount = "/embeddings/{document_id}", durable)]
 pub trait DocumentEmbeddingGeneratorAgent {
-    fn new(#[agent_config] config: Config<EmbeddingAgentConfig>) -> Self;
+    fn new(document_id: String, #[agent_config] config: Config<EmbeddingAgentConfig>) -> Self;
 
     /// Generate and store embeddings for a specific document
-    ///
-    /// # Arguments
-    /// * `document_id` - String ID of the document to process
     ///
     /// # Returns
     /// Number of embeddings generated for the document
@@ -78,13 +75,10 @@ pub trait DocumentEmbeddingGeneratorAgent {
     #[description(
         "Generates and stores vector embeddings for a single document. Splits document into chunks, generates embeddings for each chunk, and stores them in the database."
     )]
-    #[endpoint(post = "/{document_id}/generate")]
-    async fn generate_embeddings_for_document(&self, document_id: String) -> AgentResult<u32>;
+    #[endpoint(post = "/generate")]
+    async fn generate_embeddings_for_document(&self) -> AgentResult<u32>;
 
     /// Remove all embeddings and chunks for a specific document
-    ///
-    /// # Arguments
-    /// * `document_id` - String ID of the document to remove embeddings for
     ///
     /// # Returns
     /// Ok(()) if successful, error message if failed
@@ -92,16 +86,16 @@ pub trait DocumentEmbeddingGeneratorAgent {
     #[description(
         "Deletes all embeddings and chunks associated with the specified document ID. Resets the document's embedding status to not processed."
     )]
-    #[endpoint(delete = "/{document_id}")]
-    async fn remove_embeddings_for_document(&self, document_id: String) -> AgentResult<()>;
+    #[endpoint(delete = "/")]
+    async fn remove_embeddings_for_document(&self) -> AgentResult<()>;
 
     /// Get embedding status for a document
     #[prompt("Check embedding status for a document")]
     #[description(
         "Returns the current embedding generation status for the specified document, including whether it's completed, in progress, failed, or not processed."
     )]
-    #[endpoint(get = "/{document_id}/status")]
-    async fn get_embedding_status(&self, document_id: String) -> AgentResult<EmbeddingStatus>;
+    #[endpoint(get = "/status")]
+    async fn get_embedding_status(&self) -> AgentResult<EmbeddingStatus>;
 }
 
 struct EmbeddingGeneratorAgentImpl {
@@ -126,11 +120,8 @@ impl EmbeddingGeneratorAgent for EmbeddingGeneratorAgentImpl {
         // Process all documents in parallel using join_all
         let futures = document_ids.into_iter().map(|document_id| async move {
             // Create a separate document embedding generator for each document
-            let doc_generator = DocumentEmbeddingGeneratorAgentClient::new_phantom();
-            match doc_generator
-                .generate_embeddings_for_document(document_id.clone())
-                .await
-            {
+            let doc_generator = DocumentEmbeddingGeneratorAgentClient::get(document_id.clone());
+            match doc_generator.generate_embeddings_for_document().await {
                 Ok(count) => {
                     log::debug!(
                         "Successfully generated {} embeddings for document: {}",
@@ -224,70 +215,64 @@ impl EmbeddingGeneratorAgent for EmbeddingGeneratorAgentImpl {
 }
 
 struct DocumentEmbeddingGeneratorAgentImpl {
-    embedding_client: EmbeddingClient,
+    document_id: String,
     chunk_config: ChunkConfig,
     config: Config<EmbeddingAgentConfig>,
 }
 
 #[agent_implementation]
 impl DocumentEmbeddingGeneratorAgent for DocumentEmbeddingGeneratorAgentImpl {
-    fn new(#[agent_config] config: Config<EmbeddingAgentConfig>) -> Self {
-        let embedding_client = EmbeddingClient::from(config.get().embedding)
-            .expect("Failed to create embedding client from environment");
-
+    fn new(document_id: String, #[agent_config] config: Config<EmbeddingAgentConfig>) -> Self {
         let chunk_config = ChunkConfig::default();
 
         Self {
-            embedding_client,
+            document_id,
             chunk_config,
             config,
         }
     }
 
-    async fn generate_embeddings_for_document(&self, document_id: String) -> AgentResult<u32> {
-        log::info!("Generating embeddings for document: {}", document_id);
+    async fn generate_embeddings_for_document(&self) -> AgentResult<u32> {
+        log::info!("Generating embeddings for document: {}", self.document_id);
 
         let db_helper = self.create_db_helper()?;
 
         // Check if embeddings already exist and return early if completed
         if let Ok(EmbeddingStatus::Completed { chunk_count }) =
-            db_helper.get_embedding_status(&document_id)
+            db_helper.get_embedding_status(&self.document_id)
         {
             log::info!(
                 "Embeddings already exist for document: {} ({} chunks), skipping",
-                document_id,
+                self.document_id,
                 chunk_count
             );
             return Ok(chunk_count as u32);
         }
 
         // Check if embeddings are already in progress
-        if let Ok(EmbeddingStatus::InProgress) = db_helper.get_embedding_status(&document_id) {
+        if let Ok(EmbeddingStatus::InProgress) = db_helper.get_embedding_status(&self.document_id) {
             log::info!(
                 "Embeddings are already in progress for document: {}, skipping",
-                document_id
+                self.document_id
             );
             return Err("Embeddings are already in progress".into());
         }
 
         // Load document
-        let document = self.load_document(&db_helper, &document_id)?;
+        let document = self.load_document(&db_helper)?;
 
         // Mark as in progress
-        self.mark_status(&db_helper, &document_id, &EmbeddingStatus::InProgress)?;
+        self.mark_status(&db_helper, &EmbeddingStatus::InProgress)?;
 
         // Clean up any existing partial data
-        self.cleanup_existing_chunks(&db_helper, &document_id)?;
+        self.cleanup_existing_chunks(&db_helper)?;
 
         // Process document
-        let embedding_count = self
-            .process_document(&db_helper, &document_id, &document.content)
-            .await?;
+        let embedding_count = self.process_document(&db_helper, &document.content).await?;
 
         // Mark as completed
         self.mark_status(
             &db_helper,
-            &document_id,
             &EmbeddingStatus::Completed {
                 chunk_count: embedding_count as usize,
             },
@@ -296,35 +281,35 @@ impl DocumentEmbeddingGeneratorAgent for DocumentEmbeddingGeneratorAgentImpl {
         log::info!(
             "Successfully generated {} embeddings for document: {}",
             embedding_count,
-            document_id
+            self.document_id
         );
         Ok(embedding_count)
     }
 
-    async fn get_embedding_status(&self, document_id: String) -> AgentResult<EmbeddingStatus> {
+    async fn get_embedding_status(&self) -> AgentResult<EmbeddingStatus> {
         let db_helper = self.create_db_helper()?;
         db_helper
-            .get_embedding_status(&document_id)
+            .get_embedding_status(&self.document_id)
             .map_err(|e| ErrorResponse::from(format!("Failed to get embedding status: {:?}", e)))
     }
 
-    async fn remove_embeddings_for_document(&self, document_id: String) -> AgentResult<()> {
-        log::info!("Removing embeddings for document: {}", document_id);
+    async fn remove_embeddings_for_document(&self) -> AgentResult<()> {
+        log::info!("Removing embeddings for document: {}", self.document_id);
 
         let db_helper = self.create_db_helper()?;
 
         // Verify document exists
-        self.load_document(&db_helper, &document_id)?;
+        self.load_document(&db_helper)?;
 
         // Remove embeddings and chunks
-        self.cleanup_existing_chunks(&db_helper, &document_id)?;
+        self.cleanup_existing_chunks(&db_helper)?;
 
         // Reset status
-        self.mark_status(&db_helper, &document_id, &EmbeddingStatus::NotProcessed)?;
+        self.mark_status(&db_helper, &EmbeddingStatus::NotProcessed)?;
 
         log::info!(
             "Successfully removed embeddings for document: {}",
-            document_id
+            self.document_id
         );
         Ok(())
     }
@@ -333,7 +318,6 @@ impl DocumentEmbeddingGeneratorAgent for DocumentEmbeddingGeneratorAgentImpl {
 impl DocumentEmbeddingGeneratorAgentImpl {
     fn chunk_document(
         &self,
-        document_id: &str,
         content: &str,
         config: &ChunkConfig,
     ) -> AgentResult<Vec<DocumentChunk>> {
@@ -378,7 +362,7 @@ impl DocumentEmbeddingGeneratorAgentImpl {
             // Create chunk
             let chunk = DocumentChunk {
                 id: uuid::Uuid::new_v4().to_string(),
-                document_id: document_id.to_string(),
+                document_id: self.document_id.clone(),
                 content: chunk_content.clone(),
                 chunk_index: chunk_index as u32,
                 start_pos: chunk_start as u32,
@@ -433,7 +417,6 @@ impl DocumentEmbeddingGeneratorAgentImpl {
     async fn generate_and_store_embedding(
         &self,
         db_helper: &DatabaseHelper,
-        document_id: &str,
         chunk_index: u32,
         chunk: &DocumentChunk,
     ) -> AgentResult<String> {
@@ -442,9 +425,12 @@ impl DocumentEmbeddingGeneratorAgentImpl {
             "Generating embedding for chunk: {}",
             &chunk.content[..chunk.content.len().min(100)]
         );
-        let embedding_vector = self
-            .embedding_client
-            .generate_embedding_with_fallback(&chunk.content)
+
+        let embedding_client = EmbeddingClient::new(self.config.get().embedding)
+            .map_err(|e| format!("Failed to create embedding client: {:?}", e))?;
+
+        let embedding_vector = embedding_client
+            .generate_embedding(&chunk.content)
             .await
             .map_err(|e| format!("Failed to generate embedding: {:?}", e))?;
 
@@ -456,7 +442,7 @@ impl DocumentEmbeddingGeneratorAgentImpl {
         // Create embedding record with proper mapping to database schema
         let embedding = Embedding {
             id: uuid::Uuid::new_v4().to_string(),
-            chunk_id: document_id.to_string(), // Use document_id instead of chunk_id for now
+            chunk_id: self.document_id.clone(), // Use document_id instead of chunk_id for now
             vector: Vector(embedding_vector),
             model_name: self.get_model_name(),
             created_at: Utc::now().to_rfc3339(), // Use actual current time
@@ -464,19 +450,24 @@ impl DocumentEmbeddingGeneratorAgentImpl {
 
         // Store embedding
         db_helper
-            .store_embedding(&embedding, document_id, chunk_index as i32, &chunk.content)
+            .store_embedding(
+                &embedding,
+                &self.document_id,
+                chunk_index as i32,
+                &chunk.content,
+            )
             .map_err(|e| format!("Failed to store embedding: {:?}", e))?;
 
         log::debug!(
             "Generated and stored embedding for chunk {} of document {}",
             chunk_index,
-            document_id
+            self.document_id
         );
         Ok(chunk.id.clone())
     }
 
     fn get_model_name(&self) -> String {
-        self.embedding_client.model.clone()
+        self.config.get().embedding.model.clone()
     }
 
     fn create_db_helper(&self) -> AgentResult<DatabaseHelper> {
@@ -484,42 +475,32 @@ impl DocumentEmbeddingGeneratorAgentImpl {
             .map_err(|e| ErrorResponse::from(format!("Failed to create database helper: {:?}", e)))
     }
 
-    fn load_document(
-        &self,
-        db_helper: &DatabaseHelper,
-        document_id: &str,
-    ) -> AgentResult<Document> {
+    fn load_document(&self, db_helper: &DatabaseHelper) -> AgentResult<Document> {
         db_helper
-            .load_document(document_id)
+            .load_document(&self.document_id)
             .map_err(|e| ErrorResponse::from(format!("Failed to load document: {:?}", e)))?
-            .ok_or_else(|| ErrorResponse::from(format!("Document not found: {}", document_id)))
+            .ok_or_else(|| ErrorResponse::from(format!("Document not found: {}", self.document_id)))
     }
 
-    fn mark_status(
-        &self,
-        db_helper: &DatabaseHelper,
-        document_id: &str,
-        status: &EmbeddingStatus,
-    ) -> AgentResult<()> {
+    fn mark_status(&self, db_helper: &DatabaseHelper, status: &EmbeddingStatus) -> AgentResult<()> {
         db_helper
-            .update_embedding_status(document_id, status)
+            .update_embedding_status(&self.document_id, status)
             .map_err(|e| ErrorResponse::from(format!("Failed to update embedding status: {:?}", e)))
     }
 
     async fn process_document(
         &self,
         db_helper: &DatabaseHelper,
-        document_id: &str,
         content: &str,
     ) -> AgentResult<u32> {
         // Split document into chunks
-        let chunks = self.chunk_document(document_id, content, &self.chunk_config)?;
+        let chunks = self.chunk_document(content, &self.chunk_config)?;
 
         // Generate embeddings for each chunk
         let mut embedding_count = 0;
         for (chunk_index, chunk) in chunks.iter().enumerate() {
             match self
-                .generate_and_store_embedding(db_helper, document_id, chunk_index as u32, chunk)
+                .generate_and_store_embedding(db_helper, chunk_index as u32, chunk)
                 .await
             {
                 Ok(_) => embedding_count += 1,
@@ -537,21 +518,20 @@ impl DocumentEmbeddingGeneratorAgentImpl {
         Ok(embedding_count)
     }
 
-    fn cleanup_existing_chunks(
-        &self,
-        db_helper: &DatabaseHelper,
-        document_id: &str,
-    ) -> AgentResult<()> {
-        log::debug!("Cleaning up existing chunks for document: {}", document_id);
+    fn cleanup_existing_chunks(&self, db_helper: &DatabaseHelper) -> AgentResult<()> {
+        log::debug!(
+            "Cleaning up existing chunks for document: {}",
+            self.document_id
+        );
 
         let tables = ["document_chunks", "document_embeddings"];
         db_helper
-            .delete_from_tables(document_id, &tables)
+            .delete_from_tables(&self.document_id, &tables)
             .map_err(|e| format!("Failed to cleanup existing chunks: {:?}", e))?;
 
         log::debug!(
             "Successfully cleaned up existing chunks and embeddings for document: {}",
-            document_id
+            self.document_id
         );
         Ok(())
     }

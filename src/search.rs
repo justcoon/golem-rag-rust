@@ -157,23 +157,13 @@ impl SearchAgent for SearchAgentImpl {
 
 impl SearchAgentImpl {
     async fn generate_query_embedding(&self, query: &str) -> AgentResult<Vec<f32>> {
-        let embedding_client = EmbeddingClient::from(self.config.get().embedding).map_err(|e| {
-            ErrorResponse::from(format!(
-                "Failed to create embedding client from environment: {:?}",
-                e
-            ))
-        })?;
+        let embedding_client = EmbeddingClient::new(self.config.get().embedding)
+            .map_err(|e| format!("Failed to create embedding client: {:?}", e))?;
 
-        match embedding_client
-            .generate_embedding_with_fallback(query)
-            .await
-        {
+        match embedding_client.generate_embedding(query).await {
             Ok(embedding) => Ok(embedding),
             Err(e) => {
-                log::error!(
-                    "Failed to generate query embedding even with fallback: {:?}",
-                    e
-                );
+                log::error!("Failed to generate query embedding: {:?}", e);
                 Err(format!("Failed to generate query embedding: {:?}", e).into())
             }
         }

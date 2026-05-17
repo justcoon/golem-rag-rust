@@ -238,13 +238,13 @@ curl -X POST http://localhost:9006/search \
 #### DocumentEmbeddingGeneratorAgent
 ```bash
 # Generate embeddings for a specific document
-golem agent invoke 'DocumentEmbeddingGeneratorAgent()' generate_embeddings_for_document '"doc_123"'
+golem agent invoke 'DocumentEmbeddingGeneratorAgent("doc_123")' generate_embeddings_for_document
 
 # Remove embeddings for a document
-golem agent invoke 'DocumentEmbeddingGeneratorAgent()' remove_embeddings_for_document '"doc_123"'
+golem agent invoke 'DocumentEmbeddingGeneratorAgent("doc_123")' remove_embeddings_for_document
 
 # Get embedding status for a document
-golem agent invoke 'DocumentEmbeddingGeneratorAgent()' get_embedding_status '"doc_123"'
+golem agent invoke 'DocumentEmbeddingGeneratorAgent("doc_123")' get_embedding_status
 ```
 
 #### EmbeddingGeneratorAgent
