@@ -2,7 +2,7 @@
 
 Most developers today are familiar with the basic Retrieval-Augmented Generation (RAG) pattern. You take some documents, chunk them, turn them into vectors, and then search through them to give an LLM some context. It sounds simple enough when you're running a script on your laptop, but things get complicated quickly when you move to production. You have to worry about what happens when an embedding service goes down halfway through a thousand-document sync, or how to handle long-running background tasks without managing complex job queues.
 
-In this project, I decided to tackle these problems using Golem, a platform for durable execution. Instead of building a monolithic server or a collection of fragile microservices, I built a set of autonomous agents that each handle a specific part of the RAG pipeline.
+In this project, I decided to tackle these problems using Golem, a platform for durable execution. Instead of building a monolithic server or a collection of microservices, I built a set of autonomous agents that each handle a specific part of the RAG pipeline.
 
 ### The Agentic Approach
 
@@ -28,11 +28,11 @@ One of the most powerful features of Golem is how these agents work together. In
 
 The synchronization flow is a perfect example of this collaboration:
 1. The **S3DocumentSyncAgent** acts as the orchestrator. When it's time to sync, it asks the **S3DocumentLoaderAgent** for a list of buckets.
-2. For each bucket, the Sync agent triggers a parallel process. It doesn't do the work itself; instead, it delegates.
-3. The **S3DocumentLoaderAgent** pulls document contents from S3 and stores them via the **DocumentAgent**.
-4. Once the documents are ready, the **EmbeddingGeneratorAgent** takes over. To handle high volume, it spins up multiple **DocumentEmbeddingGeneratorAgent** instances—one for each document.
+2. For each bucket, the Sync agent triggers a parallel process. It doesn't do the work itself; instead, it delegates by spawning **Phantom Agents** (ephemeral, isolated instances) of the **S3DocumentLoaderAgent** and **EmbeddingGeneratorAgent** to process each bucket independently.
+3. These phantom **S3DocumentLoaderAgent** instances pull document contents from S3 and store them directly in the database.
+4. Once the documents are ready, the **EmbeddingGeneratorAgent** (which is **ephemeral** and acts purely as an orchestrator) takes over. To handle high volume, it spins up multiple **durable** **DocumentEmbeddingGeneratorAgent** instances—one for each document ID.
 
-This delegation is done using **Phantom Agents**. In Golem, you can create a "phantom" instance of an agent that has its own isolated state and lifecycle. This allows us to process hundreds of documents in parallel without blocking the main sync process. If one document fails to embed because of a network glitch, Golem's durability ensures that *only* that specific agent retries, while the rest of the system moves forward.
+This delegation relies on Golem's natural agent instantiation. Because each `DocumentEmbeddingGeneratorAgent` is uniquely identified by its document ID and has its own isolated state, we can process hundreds of documents in parallel without blocking the main sync process. If one document fails to embed because of a network glitch, Golem's durability ensures that *only* that specific agent retries its chunking and embedding process, while the rest of the system moves forward.
 
 These agents interact with a few critical external services to keep the data flowing. We use **PostgreSQL** with the pgvector extension to store both the structured metadata and the high-dimensional embeddings. The source documents themselves live in **Amazon S3**, which acts as our primary document store. Finally, we rely on an **Embedding API** (such as OpenAI) to handle the heavy mathematical lifting of vector generation.
 
