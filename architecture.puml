@@ -105,7 +105,7 @@ note right of doc_embedding_gen
   - Single document embedding processing
   - Text chunking and vector generation
   - Embedding status tracking
-  - State: Ephemeral
+  - State: Persistent
 end note
 
 note right of s3_loader
