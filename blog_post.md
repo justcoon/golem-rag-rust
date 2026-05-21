@@ -31,8 +31,7 @@ The synchronization flow is a perfect example of this collaboration:
 2. For each bucket, the Sync agent triggers a parallel process. It doesn't do the work itself; instead, it delegates by spawning **Phantom Agents** (ephemeral, isolated instances) of the **S3DocumentLoaderAgent** and **EmbeddingGeneratorAgent** to process each bucket independently.
 3. These phantom **S3DocumentLoaderAgent** instances pull document contents from S3 and store them directly in the database.
 4. Once the documents are ready, the **EmbeddingGeneratorAgent** (which is **ephemeral** and acts purely as an orchestrator) takes over. To handle high volume, it spins up multiple **durable** **DocumentEmbeddingGeneratorAgent** instances—one for each document ID.
-
-This delegation relies on Golem's natural agent instantiation. Because each `DocumentEmbeddingGeneratorAgent` is uniquely identified by its document ID and has its own isolated state, we can process hundreds of documents in parallel without blocking the main sync process. If one document fails to embed because of a network glitch, Golem's durability ensures that *only* that specific agent retries its chunking and embedding process, while the rest of the system moves forward.
+This delegation relies on Golem's natural agent instantiation. Because each `DocumentEmbeddingGeneratorAgent` is uniquely identified by its document ID and has its own isolated state, we can process hundreds of documents in parallel without blocking the main sync process.
 
 These agents interact with a few critical external services to keep the data flowing. We use **PostgreSQL** with the pgvector extension to store both the structured metadata and the high-dimensional embeddings. The source documents themselves live in **Amazon S3**, which acts as our primary document store. Finally, we rely on an **Embedding API** (such as OpenAI) to handle the heavy mathematical lifting of vector generation.
 
@@ -44,6 +43,27 @@ One of the biggest hurdles in microservice development is the "glue code"—hand
 *   **Typed Configuration**: Agents can receive structured configuration via `#[agent_config]`. You define a standard Rust struct with the `ConfigSchema` derive, and Golem ensures the values are correctly injected and validated at runtime.
 *   **Secure Secrets**: For sensitive data like OpenAI API keys or database passwords, Golem provides a dedicated `Secret<T>` type. These are marked with `#[config_schema(secret)]`, ensuring they are handled securely, kept out of persistent logs, and never checked into source control. You manage them through the CLI or environment-specific secret stores.
 
+### Document Embedding
+
+The `DocumentEmbeddingGeneratorAgent` is a durable agent that processes a single document identified by its ID.
+
+```rust
+#[agent_definition(mount = "/embeddings/{document_id}", durable)]
+pub trait DocumentEmbeddingGeneratorAgent {
+    fn new(document_id: String, #[agent_config] config: Config<EmbeddingAgentConfig>) -> Self;
+
+    #[endpoint(post = "/generate")]
+    async fn generate_embeddings_for_document(&self) -> AgentResult<u32>;
+
+    #[endpoint(delete = "/")]
+    async fn remove_embeddings_for_document(&self) -> AgentResult<()>;
+
+    #[endpoint(get = "/status")]
+    async fn get_embedding_status(&self) -> AgentResult<EmbeddingStatus>;
+}
+```
+
+Generating embeddings for a document is a multi-step process. It first retrieves the document from the database, splits it into smaller chunks based on the configurable chunk size and overlap defined in `EmbeddingConfig`, and generates vector embeddings for each chunk using the configured embedding service. The resulting embeddings are stored in the PostgreSQL `pgvector` table and linked to the original document ID. Because the agent is durable, any failure—such as a network glitch or API rate limit—triggers automatic retries for the affected document without disturbing the overall sync process.
 
 ### Hybrid Search: The Best of Both Worlds
 
@@ -83,7 +103,7 @@ pub trait SearchAgent {
 }
 ```
 
-The `SearchAgent` is marked as **ephemeral** because it doesn't need to hold onto state between calls—it just performs the search and returns the results. This is ideal for request-response patterns where each interaction is independent.
+The **SearchAgent** is marked as `ephemeral` because it doesn't need to hold onto state between calls—it just performs the search and returns the results. This is ideal for request-response patterns where each interaction is independent.
 
 It performs two parallel operations:
 1.  **Vector Similarity Search**: Using `pgvector` to find the most semantically relevant chunks.
