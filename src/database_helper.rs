@@ -85,10 +85,24 @@ impl DatabaseHelperRagext for DatabaseHelper {
     fn update_embedding_status(&self, document_id: &str, status: &EmbeddingStatus) -> Result<()> {
         let status_str = status.to_string();
 
-        self.connection.execute(
+        let count = self.connection.execute(
             "UPDATE document_embeddings SET embedding_status = $1, updated_at = NOW() WHERE document_id = $2",
-            encode_params![status_str, document_id],
+            encode_params![status_str.clone(), document_id],
         )?;
+
+        if count == 0 {
+            self.connection.execute(
+                "INSERT INTO document_embeddings (id, document_id, chunk_index, chunk_text, embedding_status)
+                 VALUES ($1, $2, $3, $4, $5)",
+                encode_params![
+                    uuid::Uuid::new_v4().to_string(),
+                    document_id,
+                    -1,
+                    "",
+                    status_str
+                ],
+            )?;
+        }
 
         Ok(())
     }

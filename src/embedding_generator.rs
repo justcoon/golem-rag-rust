@@ -237,10 +237,12 @@ impl DocumentEmbeddingGeneratorAgent for DocumentEmbeddingGeneratorAgentImpl {
 
         let db_helper = self.create_db_helper()?;
 
+        let embedding_status = db_helper
+            .get_embedding_status(&self.document_id)
+            .map_err(|e| ErrorResponse::from(format!("Failed to get embedding status: {:?}", e)))?;
+
         // Check if embeddings already exist and return early if completed
-        if let Ok(EmbeddingStatus::Completed { chunk_count }) =
-            db_helper.get_embedding_status(&self.document_id)
-        {
+        if let EmbeddingStatus::Completed { chunk_count } = embedding_status {
             log::info!(
                 "Embeddings already exist for document: {} ({} chunks), skipping",
                 self.document_id,
@@ -250,7 +252,7 @@ impl DocumentEmbeddingGeneratorAgent for DocumentEmbeddingGeneratorAgentImpl {
         }
 
         // Check if embeddings are already in progress
-        if let Ok(EmbeddingStatus::InProgress) = db_helper.get_embedding_status(&self.document_id) {
+        if let EmbeddingStatus::InProgress = embedding_status {
             log::info!(
                 "Embeddings are already in progress for document: {}, skipping",
                 self.document_id
@@ -261,22 +263,11 @@ impl DocumentEmbeddingGeneratorAgent for DocumentEmbeddingGeneratorAgentImpl {
         // Load document
         let document = self.load_document(&db_helper)?;
 
-        // Mark as in progress
-        self.mark_status(&db_helper, &EmbeddingStatus::InProgress)?;
-
         // Clean up any existing partial data
         self.cleanup_existing_chunks(&db_helper)?;
 
         // Process document
         let embedding_count = self.process_document(&db_helper, &document.content).await?;
-
-        // Mark as completed
-        self.mark_status(
-            &db_helper,
-            &EmbeddingStatus::Completed {
-                chunk_count: embedding_count as usize,
-            },
-        )?;
 
         log::info!(
             "Successfully generated {} embeddings for document: {}",
@@ -303,9 +294,6 @@ impl DocumentEmbeddingGeneratorAgent for DocumentEmbeddingGeneratorAgentImpl {
 
         // Remove embeddings and chunks
         self.cleanup_existing_chunks(&db_helper)?;
-
-        // Reset status
-        self.mark_status(&db_helper, &EmbeddingStatus::NotProcessed)?;
 
         log::info!(
             "Successfully removed embeddings for document: {}",
@@ -417,6 +405,7 @@ impl DocumentEmbeddingGeneratorAgentImpl {
     async fn generate_and_store_embedding(
         &self,
         db_helper: &DatabaseHelper,
+        embedding_client: &EmbeddingClient,
         chunk_index: u32,
         chunk: &DocumentChunk,
     ) -> AgentResult<String> {
@@ -425,9 +414,6 @@ impl DocumentEmbeddingGeneratorAgentImpl {
             "Generating embedding for chunk: {}",
             &chunk.content[..chunk.content.len().min(100)]
         );
-
-        let embedding_client = EmbeddingClient::new(self.config.get().embedding)
-            .map_err(|e| format!("Failed to create embedding client: {:?}", e))?;
 
         let embedding_vector = embedding_client
             .generate_embedding(&chunk.content)
@@ -498,21 +484,58 @@ impl DocumentEmbeddingGeneratorAgentImpl {
 
         // Generate embeddings for each chunk
         let mut embedding_count = 0;
-        for (chunk_index, chunk) in chunks.iter().enumerate() {
-            match self
-                .generate_and_store_embedding(db_helper, chunk_index as u32, chunk)
-                .await
-            {
-                Ok(_) => embedding_count += 1,
-                Err(e) => {
-                    log::error!(
-                        "Failed to generate embedding for chunk {}: {}",
-                        chunk_index,
-                        e.message
-                    );
-                    // Continue with other chunks
+
+        if !chunks.is_empty() {
+            let embedding_client = EmbeddingClient::new(self.config.get().embedding)
+                .map_err(|e| format!("Failed to create embedding client: {:?}", e))?;
+
+            for (chunk_index, chunk) in chunks.iter().enumerate() {
+                match self
+                    .generate_and_store_embedding(
+                        db_helper,
+                        &embedding_client,
+                        chunk_index as u32,
+                        chunk,
+                    )
+                    .await
+                {
+                    Ok(_) => embedding_count += 1,
+                    Err(e) => {
+                        log::error!(
+                            "Failed to generate embedding for chunk {}: {}",
+                            chunk_index,
+                            e.message
+                        );
+                        if let Err(cleanup_err) = self.cleanup_existing_chunks(db_helper) {
+                            log::error!(
+                                "Failed to clean up chunks on error for document {}: {}",
+                                self.document_id,
+                                cleanup_err.message
+                            );
+                        }
+                        if let Err(status_err) = self.mark_status(
+                            &db_helper,
+                            &EmbeddingStatus::Failed {
+                                error: e.message.clone(),
+                            },
+                        ) {
+                            log::error!(
+                                "Failed to update status to Failed for document {}: {}",
+                                self.document_id,
+                                status_err.message
+                            );
+                        }
+                        return Err(e);
+                    }
                 }
             }
+            // Mark as completed
+            self.mark_status(
+                &db_helper,
+                &EmbeddingStatus::Completed {
+                    chunk_count: embedding_count as usize,
+                },
+            )?;
         }
 
         Ok(embedding_count)
