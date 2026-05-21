@@ -63,7 +63,7 @@ pub trait DocumentEmbeddingGeneratorAgent {
 }
 ```
 
-Generating embeddings for a document is a multi-step process. It first retrieves the document from the database, splits it into smaller chunks based on the configurable chunk size and overlap defined in `EmbeddingConfig`, and generates vector embeddings for each chunk using the configured embedding service. The resulting embeddings are stored in the PostgreSQL `pgvector` table and linked to the original document ID. Because the agent is durable, any failure—such as a network glitch or API rate limit—triggers automatic retries for the affected document without disturbing the overall sync process.
+Generating embeddings for a document is a multi-step process. It first retrieves the document from the database, splits it into smaller chunks based on the configurable chunk size and overlap defined in `EmbeddingConfig`, and generates vector embeddings for each chunk using the configured embedding service. The resulting embeddings are stored in the PostgreSQL `pgvector` table and linked to the original document ID.
 
 ### Hybrid Search: The Best of Both Worlds
 
