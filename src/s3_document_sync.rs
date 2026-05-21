@@ -30,7 +30,7 @@ impl SyncState {
             Some(
                 chrono::Utc::now()
                     .checked_add_signed(chrono::Duration::minutes(interval_minutes as i64))
-                    .unwrap_or_else(|| chrono::Utc::now())
+                    .unwrap_or_else(chrono::Utc::now)
                     .to_rfc3339(),
             )
         } else {
@@ -54,7 +54,7 @@ impl SyncState {
                         .checked_add_signed(chrono::Duration::minutes(
                             schedule.interval_minutes as i64,
                         ))
-                        .unwrap_or_else(|| chrono::Utc::now())
+                        .unwrap_or_else(chrono::Utc::now)
                         .to_rfc3339(),
                 );
             } else {
@@ -257,10 +257,7 @@ impl S3DocumentSyncAgent for S3DocumentSyncAgentImpl {
         log::info!("Found {} buckets to sync", buckets.len());
 
         // Process all buckets in parallel
-        let bucket_futures: Vec<_> = buckets
-            .into_iter()
-            .map(|bucket| sync_bucket(bucket))
-            .collect();
+        let bucket_futures: Vec<_> = buckets.into_iter().map(sync_bucket).collect();
 
         let bucket_results = future::join_all(bucket_futures).await;
 
