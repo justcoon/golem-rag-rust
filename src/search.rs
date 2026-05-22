@@ -238,13 +238,11 @@ impl SearchAgentImpl {
         let result = db_helper
             .connection
             .query(query, encode_params![document_id])
-            .map_err(|e| {
-                ErrorResponse::from(format!("Failed to get document embedding: {:?}", e))
-            })?;
+            .map_err(|e| format!("Failed to get document embedding: {:?}", e))?;
 
         use crate::common_lib::database::decode::{DbResultDecoder, Single};
         Single::<Vector>::decode_result(result)
-            .map_err(|e| ErrorResponse::from(format!("Failed to decode embedding: {:?}", e)))?
+            .map_err(|e| format!("Failed to decode embedding: {:?}", e))?
             .into_iter()
             .next()
             .map(|s| s.0)
@@ -389,7 +387,7 @@ impl SearchAgentImpl {
         fn rrf_score(config: &HybridSearchConfig, rank: usize) -> f32 {
             1.0 / (config.rrf_k + (rank + 1) as f32)
         }
-        
+
         let mut fused_results = std::collections::HashMap::new();
 
         // Process semantic results

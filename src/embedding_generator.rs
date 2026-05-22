@@ -183,9 +183,8 @@ impl EmbeddingGeneratorAgent for EmbeddingGeneratorAgentImpl {
 
     async fn get_documents_without_embeddings(&self) -> AgentResult<Vec<String>> {
         log::info!("Finding all documents without embeddings");
-        let db_helper = DatabaseHelper::from(self.config.get().db).map_err(|e| {
-            ErrorResponse::from(format!("Failed to create database helper: {:?}", e))
-        })?;
+        let db_helper = DatabaseHelper::from(self.config.get().db)
+            .map_err(|e| format!("Failed to create database helper: {:?}", e))?;
 
         // Query for documents that don't have embeddings or have failed embeddings
         let query = r#"
@@ -239,7 +238,7 @@ impl DocumentEmbeddingGeneratorAgent for DocumentEmbeddingGeneratorAgentImpl {
 
         let embedding_status = db_helper
             .get_embedding_status(&self.document_id)
-            .map_err(|e| ErrorResponse::from(format!("Failed to get embedding status: {:?}", e)))?;
+            .map_err(|e| format!("Failed to get embedding status: {:?}", e))?;
 
         // Check if embeddings already exist and return early if completed
         if let EmbeddingStatus::Completed { chunk_count } = embedding_status {
@@ -464,7 +463,7 @@ impl DocumentEmbeddingGeneratorAgentImpl {
     fn load_document(&self, db_helper: &DatabaseHelper) -> AgentResult<Document> {
         db_helper
             .load_document(&self.document_id)
-            .map_err(|e| ErrorResponse::from(format!("Failed to load document: {:?}", e)))?
+            .map_err(|e| format!("Failed to load document: {:?}", e))?
             .ok_or_else(|| ErrorResponse::from(format!("Document not found: {}", self.document_id)))
     }
 
