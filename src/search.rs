@@ -385,12 +385,17 @@ impl SearchAgentImpl {
         keyword_results: Vec<SearchResult>,
         config: &HybridSearchConfig,
     ) -> AgentResult<Vec<HybridSearchResult>> {
+        // Helper function to compute RRF score
+        fn rrf_score(config: &HybridSearchConfig, rank: usize) -> f32 {
+            1.0 / (config.rrf_k + (rank + 1) as f32)
+        }
+        
         let mut fused_results = std::collections::HashMap::new();
 
         // Process semantic results
         for (rank, result) in semantic_results.iter().enumerate() {
             let chunk_id = &result.chunk.id;
-            let semantic_rrf_score = 1.0 / (config.rrf_k + (rank + 1) as f32);
+            let semantic_rrf_score = rrf_score(config, rank);
 
             fused_results.insert(
                 chunk_id.clone(),
@@ -408,7 +413,7 @@ impl SearchAgentImpl {
         // Process keyword results
         for (rank, result) in keyword_results.iter().enumerate() {
             let chunk_id = &result.chunk.id;
-            let keyword_rrf_score = 1.0 / (config.rrf_k + (rank + 1) as f32);
+            let keyword_rrf_score = rrf_score(config, rank);
 
             if let Some(existing) = fused_results.get_mut(chunk_id) {
                 // Update existing result with keyword score
@@ -436,11 +441,8 @@ impl SearchAgentImpl {
 
         // Convert to sorted vector
         let mut results: Vec<HybridSearchResult> = fused_results.into_values().collect();
-        results.sort_by(|a, b| {
-            b.combined_score
-                .partial_cmp(&a.combined_score)
-                .unwrap_or(std::cmp::Ordering::Equal)
-        });
+        // Sort results by combined score descending using total_cmp for deterministic ordering
+        results.sort_by(|a, b| b.combined_score.total_cmp(&a.combined_score));
 
         Ok(results)
     }
