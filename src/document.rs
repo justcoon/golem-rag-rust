@@ -135,9 +135,7 @@ impl DocumentAgent for DocumentAgentImpl {
         let result = db_helper
             .connection
             .query(&sql_query, params)
-            .map_err(|e| {
-                ErrorResponse::from(format!("Failed to execute document list query: {:?}", e))
-            })?;
+            .map_err(|e| format!("Failed to execute document list query: {:?}", e))?;
 
         use crate::common_lib::database::decode::DbResultDecoder;
         Document::decode_result(result)

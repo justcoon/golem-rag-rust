@@ -112,28 +112,34 @@ It performs two parallel operations:
 To combine these different scoring systems, I used **Reciprocal Rank Fusion (RRF)**. RRF is a simple yet effective algorithm that ranks documents based on their position in the individual search result lists, rather than their raw scores. This prevents one search method from "overpowering" the other just because its scoring scale is different.
 
 ```rust
+
 fn fuse_results(
     &self,
     semantic_results: Vec<SearchResult>,
     keyword_results: Vec<SearchResult>,
     config: &HybridSearchConfig,
 ) -> AgentResult<Vec<HybridSearchResult>> {
+    // Helper for RRF score
+    fn rrf_score(config: &HybridSearchConfig, rank: usize) -> f32 {
+        1.0 / (config.rrf_k + (rank + 1) as f32)
+    }
+
     let mut fused_results = HashMap::new();
 
     // Semantic RRF scoring
     for (rank, result) in semantic_results.iter().enumerate() {
-        let score = 1.0 / (config.rrf_k + (rank + 1) as f32);
+        let score = rrf_score(config, rank);
         // ... insert into map with weight
     }
 
     // Keyword RRF scoring
     for (rank, result) in keyword_results.iter().enumerate() {
-        let score = 1.0 / (config.rrf_k + (rank + 1) as f32);
+        let score = rrf_score(config, rank);
         // ... update or insert into map
     }
-    
+
     // Sort by combined score
-    results.sort_by(|a, b| b.combined_score.partial_cmp(&a.combined_score)...);
+    results.sort_by(|a, b| b.combined_score.total_cmp(&a.combined_score));
     Ok(results)
 }
 ```
