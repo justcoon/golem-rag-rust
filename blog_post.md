@@ -33,7 +33,7 @@ The synchronization flow is a perfect example of this collaboration:
 4. Once the documents are ready, the **EmbeddingGeneratorAgent** (which is **ephemeral** and acts purely as an orchestrator) takes over. To handle high volume, it spins up multiple **durable** **DocumentEmbeddingGeneratorAgent** instances—one for each document ID.
 This delegation relies on Golem's natural agent instantiation. Because each `DocumentEmbeddingGeneratorAgent` is uniquely identified by its document ID and has its own isolated state, we can process hundreds of documents in parallel without blocking the main sync process.
 
-These agents interact with a few critical external services to keep the data flowing. We use **PostgreSQL** with the pgvector extension to store both the structured metadata and the high-dimensional embeddings. The source documents themselves live in **Amazon S3**, which acts as our primary document store. Finally, we rely on an **Embedding API** (such as OpenAI) to handle the heavy mathematical lifting of vector generation.
+These agents interact with a few critical external services to keep the data flowing. We use **PostgreSQL** with the pgvector extension to store both the structured metadata and the high-dimensional embeddings. The source documents themselves live in **S3 Storage**, which acts as our primary document store. Finally, we rely on an **Embedding API** (such as OpenAI) to handle the heavy mathematical lifting of vector generation.
 
 ### Out-of-the-Box Features: Endpoints, Config, and Secrets
 

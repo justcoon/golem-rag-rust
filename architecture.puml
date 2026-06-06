@@ -14,7 +14,7 @@ skinparam ComponentBorderColor #666666
 ' Define external actors and services
 actor "User" as user #FFD700
 
-package "Golem Cloud" {
+package "Golem Cloud" as golem {
     [HTTP API Gateway] as gateway #F9E79F
     [SearchAgent] as search #D5F5E3
     [DocumentAgent] as document #D6EAF8
@@ -24,14 +24,11 @@ package "Golem Cloud" {
     [S3DocumentSyncAgent] as s3_sync #FDEBD0
 }
 
-package "External Services" {
+package "External Services" as external {
     [PostgreSQL + pgvector] as postgres #AED6F1
-    [RustFS S3 Storage] as s3 #F9E79F
+    [S3 Storage] as s3 #F9E79F
     [Ollama Embedding Service] as ollama #D5F5E3
 }
-
-' Force vertical layout with explicit connections
-gateway -[hidden]-> postgres
 
 ' Define relationships
 user --> gateway : "HTTP Requests\n(REST API Calls)"
@@ -58,9 +55,6 @@ s3_loader --> postgres : "Store Documents"
 
 s3_sync --> s3_loader : "RPC\nLoad from all buckets"
 s3_sync --> embedding_gen : "RPC\nGenerate embeddings"
-
-' Database connections
-postgres --> postgres : "Store:\n- Documents\n- Document Chunks\n- Embeddings"
 
 ' Add notes
 note right of gateway
@@ -129,7 +123,7 @@ note right of s3_sync
   - State: Persistent
 end note
 
-note right of postgres
+note bottom of postgres
   <b>PostgreSQL + pgvector</b>
   - Document metadata and content
   - Text chunks for search
@@ -138,8 +132,8 @@ note right of postgres
   - Persistent storage
 end note
 
-note right of s3
-  <b>RustFS S3 Storage</b>
+note bottom of s3
+  <b>S3 Storage</b>
   - S3-compatible document storage
   - Namespace organization
   - Multiple content types supported
@@ -150,7 +144,7 @@ note right of s3
   • JSON (.json)
 end note
 
-note right of ollama
+note bottom of ollama
   <b>Ollama Embedding Service</b>
   - Local embedding generation
   - Configurable models
