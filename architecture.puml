@@ -30,6 +30,8 @@ package "External Services" as external {
     [Ollama Embedding Service] as ollama #D5F5E3
 }
 
+gateway -[hidden]-> external
+
 ' Define relationships
 user --> gateway : "HTTP Requests\n(REST API Calls)"
 
