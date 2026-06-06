@@ -481,12 +481,14 @@ impl DocumentEmbeddingGeneratorAgentImpl {
         // Split document into chunks
         let chunks = self.chunk_document(content, &self.chunk_config)?;
 
-        // Generate embeddings for each chunk
-        let mut embedding_count = 0;
-
         if !chunks.is_empty() {
+            // Generate embeddings for each chunk
+            let mut embedding_count = 0;
+
             let embedding_client = EmbeddingClient::new(self.config.get().embedding)
                 .map_err(|e| format!("Failed to create embedding client: {:?}", e))?;
+
+            let mut error: Option<ErrorResponse> = None;
 
             for (chunk_index, chunk) in chunks.iter().enumerate() {
                 match self
@@ -505,39 +507,49 @@ impl DocumentEmbeddingGeneratorAgentImpl {
                             chunk_index,
                             e.message
                         );
-                        if let Err(cleanup_err) = self.cleanup_existing_chunks(db_helper) {
-                            log::error!(
-                                "Failed to clean up chunks on error for document {}: {}",
-                                self.document_id,
-                                cleanup_err.message
-                            );
-                        }
-                        if let Err(status_err) = self.mark_status(
-                            &db_helper,
-                            &EmbeddingStatus::Failed {
-                                error: e.message.clone(),
-                            },
-                        ) {
-                            log::error!(
-                                "Failed to update status to Failed for document {}: {}",
-                                self.document_id,
-                                status_err.message
-                            );
-                        }
-                        return Err(e);
+                        error = Some(e);
+                        break;
                     }
                 }
             }
-            // Mark as completed
-            self.mark_status(
-                &db_helper,
-                &EmbeddingStatus::Completed {
-                    chunk_count: embedding_count as usize,
-                },
-            )?;
-        }
 
-        Ok(embedding_count)
+            match error {
+                None => {
+                    // Mark as completed
+                    self.mark_status(
+                        &db_helper,
+                        &EmbeddingStatus::Completed {
+                            chunk_count: embedding_count as usize,
+                        },
+                    )?;
+                    Ok(embedding_count)
+                }
+                Some(e) => {
+                    if let Err(cleanup_err) = self.cleanup_existing_chunks(db_helper) {
+                        log::error!(
+                            "Failed to clean up chunks on error for document {}: {}",
+                            self.document_id,
+                            cleanup_err.message
+                        );
+                    }
+                    if let Err(status_err) = self.mark_status(
+                        &db_helper,
+                        &EmbeddingStatus::Failed {
+                            error: e.message.clone(),
+                        },
+                    ) {
+                        log::error!(
+                            "Failed to update status to Failed for document {}: {}",
+                            self.document_id,
+                            status_err.message
+                        );
+                    }
+                    Err(e)
+                }
+            }
+        } else {
+            Ok(0)
+        }
     }
 
     fn cleanup_existing_chunks(&self, db_helper: &DatabaseHelper) -> AgentResult<()> {
