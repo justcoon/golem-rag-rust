@@ -144,7 +144,7 @@ The system consists of 6 core agents running on Golem Cloud, coordinated through
 ### External Services
 
 - **PostgreSQL + pgvector**: Persistent storage for documents, chunks, and vector embeddings
-- **RustFS S3 Storage**: S3-compatible document storage with multi-bucket support and namespace organization
+- **S3 Storage**: S3-compatible document storage with multi-bucket support and namespace organization
 - **Ollama**: Local embedding generation service with configurable models
 
 ## Quick Start
@@ -184,7 +184,7 @@ Load documents from local files directly to the PostgreSQL database:
 ./load_to_postgres.sh data/
 ```
 
-#### 2. Via S3 (RustFS) - Flexible Prefix Support
+#### 2. Via S3 - Flexible Prefix Support
 Load documents from S3-compatible storage using flexible prefix-based filtering:
 
 **Step A: Upload documents to specific bucket**
