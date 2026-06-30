@@ -9,7 +9,7 @@ echo "🔍 Running pre-commit quality gates..."
 # Check formatting
 if ! cargo fmt --all --check; then
     echo "❌ Code formatting check failed."
-    echo "   Run 'make fmt' or 'cargo fmt --all' to fix formatting."
+    echo "   Run 'cargo fmt --all' to fix formatting."
     exit 1
 fi
 

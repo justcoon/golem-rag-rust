@@ -9,6 +9,7 @@
 /target
 **/target
 
+.env
 .idea
 *.iml
 package-lock.json
