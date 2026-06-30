@@ -156,7 +156,6 @@ make pre-push
 
 ### Templates & Checklists
 - **Feature Planning**: `templates/feature-plan.md`
-- **PR Template**: `.github/PULL_REQUEST_TEMPLATE.md`
 - **Workflow Guide**: `docs/feature-implementation-workflow.md`
 
 ### Quality Gates as Skill Verification

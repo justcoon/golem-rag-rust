@@ -124,7 +124,7 @@ cargo clippy --all-targets --all-features -- -D warnings
 cargo test
 
 # Complete quality gate check
-make quality-check
+golem build && cargo fmt --all --check && cargo clippy --all-targets --all-features -- -D warnings && cargo test
 ```
 
 ## Templates
@@ -132,15 +132,12 @@ make quality-check
 ### Feature Plan Template
 Use `templates/feature-plan.md` for structured planning.
 
-### Pull Request Template
-Use `.github/PULL_REQUEST_TEMPLATE.md` for consistent PRs.
-
 ## Automation Scripts
 
 ### Quality Check Script
 Run `./scripts/quality-check.sh` for complete validation.
 
 ### Pre-commit Hook
-Install with `make install-hooks` for automatic quality checks.
+Copy scripts/pre-commit to .git/hooks/pre-commit and make it executable for automatic quality checks.
 
 This workflow ensures every feature follows a consistent process with proper planning, confirmation, and quality assurance before being considered complete.

@@ -1,6 +1,6 @@
 # Golem RAG System (Rust Implementation)
 
-A comprehensive Retrieval-Augmented Generation (RAG) system built on Golem Cloud v1.5.0, featuring hybrid search capabilities, document management, and embedding generation.
+A comprehensive Retrieval-Augmented Generation (RAG) system built on Golem Cloud v1.5.4, featuring hybrid search capabilities, document management, and embedding generation.
 
 ## Features
 
@@ -11,77 +11,7 @@ A comprehensive Retrieval-Augmented Generation (RAG) system built on Golem Cloud
 - **RESTful API**: HTTP endpoints for all operations
 - **PostgreSQL Backend**: Persistent storage with vector search capabilities (pgvector)
 
-## Available Agents
 
-### SearchAgent
-The core search agent providing multiple search strategies:
-
-**Methods:**
-- `find_similar_documents(document_id, limit?)` - Find similar documents by ID
-- `search(query, filters?, limit?, threshold?, config?)` - Search combining semantic and/or keyword search
-
-**Search Features:**
-- Configurable semantic vs keyword weights
-- Reciprocal Rank Fusion (RRF) for result combination
-- Match type detection (semantic-only, keyword-only, or both)
-- Support for all existing metadata filters
-- **Pure semantic search**: Set `enable_keyword = false` in config
-- **Pure keyword search**: Set `enable_semantic = false` in config
-
-### DocumentAgent
-Document storage and retrieval management:
-
-**Methods:**
-- `get_document(document_id)` - Retrieve complete document
-- `get_document_metadata(document_id)` - Get document metadata only
-- `list_documents(filters?, limit?)` - List documents with optional filtering
-
-### EmbeddingGeneratorAgent
-High-level batch processing coordinator for embeddings:
-
-**Methods:**
-- `generate_embeddings_for_documents(document_ids)` - Generate embeddings for multiple documents in parallel
-- `generate_embeddings_for_all_documents()` - Find and process all documents without embeddings
-
-### DocumentEmbeddingGeneratorAgent  
-Individual document embedding processor:
-
-**Methods:**
-- `generate_embeddings_for_document(document_id)` - Generate embeddings for a single document
-- `remove_embeddings_for_document(document_id)` - Remove all embeddings for a document
-- `get_embedding_status(document_id)` - Check embedding generation status
-
-### S3DocumentLoaderAgent
-S3 integration for document loading:
-
-**Methods:**
-- `load_documents(bucket, prefix?)` - Load documents from S3 bucket with optional prefix
-- `list_documents(bucket, prefix?)` - List available documents in bucket with optional prefix
-- `list_buckets()` - List all available S3 buckets
-
-**Note**: Uses `bucket` and optional `prefix` parameters for flexible S3 path filtering. The namespace is automatically extracted from the actual S3 key path structure (e.g., "legal/contracts/file.pdf" → namespace: "legal/contracts"). Supports any prefix-based filtering for maximum flexibility.
-
-### S3DocumentSyncAgent
-S3 document synchronization and processing coordinator with scheduling capabilities:
-
-**Methods:**
-- `sync_all()` - Synchronize all buckets by loading documents and generating embeddings
-- `set_sync_schedule(interval_minutes, is_repetitive)` - Configure automatic sync schedule
-- `get_sync_schedule()` - Get current sync schedule configuration
-- `execute_scheduled_sync()` - Execute sync if scheduled time has arrived
-- `delete_sync_schedule()` - Remove current sync schedule
-- `get_sync_history()` - Get complete sync history with all previous results
-
-**Features:**
-- Coordinates document loading across all S3 buckets
-- Automatically generates embeddings for newly loaded documents
-- **Scheduled synchronization** with configurable intervals and repetition
-- **Sync history tracking** with detailed results and statistics
-- **Automatic rescheduling** for repetitive sync operations
-- Provides comprehensive sync results with success/failure tracking
-- Handles errors gracefully and continues processing other buckets
-- Returns detailed statistics on documents loaded and embeddings generated
-- Maintains sync history
 
 ## Architecture
 
@@ -153,7 +83,7 @@ The system consists of 6 core agents running on Golem Cloud, coordinated through
 
 - Rust with `wasm32-wasip2` target: `rustup target add wasm32-wasip2`
 - `cargo-component` version 0.21.1: `cargo install --force cargo-component@0.21.1`
-- Golem CLI (`golem`) v1.5.0: download from https://github.com/golemcloud/golem/releases
+- Golem CLI (`golem`) v1.5.4: download from https://github.com/golemcloud/golem/releases
 - Docker and Docker Compose
 - S3 buckets (optional, for document loading)
 
@@ -202,10 +132,10 @@ Load documents from S3-compatible storage using flexible prefix-based filtering:
 **Step C: Trigger document loading in the agent**
 ```bash
 # With prefix
-golem agent invoke 'S3DocumentLoaderAgent()' load_documents '"golem-documents"' '"general/"'
+golem agent invoke 'S3DocumentLoaderAgent()' load_documents '"golem-documents"' 'Some("general/")'
 
 # Without prefix (load all documents)
-golem agent invoke 'S3DocumentLoaderAgent()' load_documents '"golem-documents"' '""'
+golem agent invoke 'S3DocumentLoaderAgent()' load_documents '"golem-documents"' 'None'
 ```
 
 **Features:**
@@ -225,7 +155,7 @@ golem agent invoke 'S3DocumentLoaderAgent()' load_documents '"golem-documents"' 
 golem build
 
 # Deploy locally
-golem deploy golem.yaml
+golem deploy --yes
 
 # Test the API (search)
 curl -X POST http://localhost:9006/search \
@@ -234,6 +164,18 @@ curl -X POST http://localhost:9006/search \
 ```
 
 ### Agent Invocation Examples
+
+#### SearchAgent
+```bash
+# Perform hybrid search (semantic + keyword search)
+golem agent invoke 'SearchAgent()' search '"quantum computing"' 'None' 'Some(5)' 'Some(0.7)' 'None'
+
+# Perform hybrid search with a specific tag filter
+golem agent invoke 'SearchAgent()' search '"artificial intelligence"' 'Some(SearchFilters { tags: ["ethics"], sources: [], content_types: [], date_range: None })' 'Some(10)' 'Some(0.5)' 'None'
+
+# Find similar documents to a target document
+golem agent invoke 'SearchAgent()' find_similar_documents '"doc_123"' 'Some(5)'
+```
 
 #### DocumentEmbeddingGeneratorAgent
 ```bash
@@ -279,176 +221,10 @@ golem agent invoke 'S3DocumentSyncAgent()' get_sync_history
 
 ## API Endpoints
 
-### Search Operations
+The complete API specification is available in OpenAPI format and can be retrieved at runtime:
 
-```bash
-# Search (primary search method)
-POST /search
-{
-  "query": "artificial intelligence ethics",
-  "filters": {
-    "content_types": ["Text", "Markdown"]
-  },
-  "limit": 10,
-  "threshold": 0.7,
-  "config": {
-    "semantic_weight": 0.7,
-    "keyword_weight": 0.3,
-    "enable_semantic": true,
-    "enable_keyword": true
-  }
-}
-
-# Pure semantic search (using search with keyword disabled)
-POST /search
-{
-  "query": "machine learning algorithms",
-  "limit": 10,
-  "threshold": 0.7,
-  "config": {
-    "enable_keyword": false,
-    "enable_semantic": true
-  }
-}
-
-# Semantic search with filters (using search)
-POST /search
-{
-  "query": "sustainable development",
-  "filters": {
-    "content_types": ["Markdown"],
-    "tags": ["environment", "climate"],
-    "sources": ["research_papers"]
-  },
-  "limit": 5,
-  "threshold": 0.8,
-  "config": {
-    "enable_keyword": false,
-    "enable_semantic": true
-  }
-}
-
-# Find similar documents
-POST /search/similar
-{
-  "document_id": "doc_123",
-  "limit": 5
-}
-```
-
-### Document Management
-
-```bash
-# Get document
-GET /documents/{document_id}
-
-# Get document metadata
-GET /documents/{document_id}/metadata
-
-# List documents with filters
-POST /documents
-{
-  "filters": {
-    "tags": ["tag1", "tag2"],
-    "sources": ["source1"],
-    "content_types": ["Text", "Markdown"],
-    "date_range": {
-      "start": "2024-01-01",
-      "end": "2024-12-31"
-    }
-  },
-  "limit": 10
-}
-```
-
-### Embedding Management
-
-```bash
-# Generate embeddings for a specific document
-POST /embeddings/{document_id}/generate
-
-# Generate embeddings for multiple documents (batch)
-POST /embeddings/generate
-
-# Check embedding status for a document
-GET /embeddings/{document_id}/status
-
-# List documents without embeddings
-GET /embeddings/without
-
-# Remove embeddings for a document
-DELETE /embeddings/{document_id}
-```
-
-### S3 Document Management
-
-```bash
-# Load documents from S3 bucket with optional prefix
-POST /s3/buckets/{bucket}/load
-{
-  "prefix": "general/"  // optional
-}
-
-# List documents in S3 bucket with optional prefix
-POST /s3/buckets/{bucket}/list
-{
-  "prefix": "general/"  // optional
-}
-
-# List all S3 buckets
-GET /s3/buckets
-
-# Synchronize all buckets (load documents and generate embeddings)
-POST /s3/sync/execute
-
-# Set sync schedule
-POST /s3/sync/schedule
-{
-  "interval_minutes": 30,
-  "is_repetitive": true
-}
-
-# Get sync schedule
-GET /s3/sync/schedule
-
-# Delete sync schedule
-DELETE /s3/sync/schedule
-
-# Get sync history
-GET /s3/sync/history
-```
-
-**Example: Load from golem-documents bucket with legal prefix**
-```bash
-POST /s3/buckets/golem-documents/load
-{
-  "prefix": "general/"
-}
-```
-
-**Example: Set up repetitive sync schedule**
-```bash
-POST /s3/sync/schedule
-{
-  "interval_minutes": 30,
-  "is_repetitive": true
-}
-```
-
-**Example: Synchronize all buckets**
-```bash
-POST /s3/sync/execute
-```
-
-### API Specification
-
-```bash
-# Get OpenAPI specification (JSON)
-GET /openapi.json
-
-# Get OpenAPI specification (YAML)
-GET /openapi.yaml
-```
+- **YAML Schema**: `GET /openapi.yaml`
+- **JSON Schema**: `GET /openapi.json`
 
 
 ## Hybrid Search Configuration
@@ -471,65 +247,7 @@ HybridSearchConfig {
 - **KeywordOnly**: Found only through full-text search
 - **BothMatch**: Found by both search methods (highest relevance)
 
-## Data Models
 
-### Document
-```rust
-Document {
-    id: String,
-    title: String,
-    content: String,
-    source: String,
-    namespace: String,
-    tags: Vec<String>,
-    metadata: DocumentMetadata,
-    // ... other fields
-}
-```
-
-### Hybrid Search Result
-```rust
-HybridSearchResult {
-    chunk: DocumentChunk,
-    semantic_score: f32,
-    keyword_score: f32,
-    combined_score: f32,
-    match_type: MatchType,
-    relevance_explanation: Option<String>,
-}
-```
-
-### Sync Schedule
-```rust
-SyncSchedule {
-    interval_minutes: u64,
-    is_repetitive: bool,
-    last_execution: Option<String>,
-    next_execution: Option<String>,
-}
-```
-
-### Sync Result
-```rust
-SyncResult {
-    bucket_results: Vec<BucketSyncResult>,
-    total_buckets_processed: usize,
-    total_documents_loaded: usize,
-    total_embeddings_generated: u32,
-    sync_timestamp: String,
-}
-```
-
-### Bucket Sync Result
-```rust
-BucketSyncResult {
-    bucket_name: String,
-    documents_loaded: usize,
-    embeddings_generated: u32,
-    errors: Vec<String>,
-    success: bool,
-}
-```
 
 ## Database Schema
 
@@ -561,40 +279,18 @@ See `docs/feature-implementation-workflow.md` for complete workflow details.
 ### Skills & Capabilities
 See `.agents/skills/feature-development/SKILL.md` for required development skills, competency levels, and onboarding guidance.
 
-### Quick Commands
+### Development Commands
 
 ```bash
-# Complete quality gate check
-make quality-check
+# Build all components
+golem build
 
-# Individual quality gates
-make build          # Build all components
-make fmt-check      # Check formatting
-make lint           # Run clippy
-make test           # Run tests
-
-# Format code
-make fmt
-
-# Pre-push validation
-make pre-push
-
-# Install git hooks (run once)
-make install-hooks
-```
-
-### Manual Commands
-
-```bash
 # Run clippy and fmt
 cargo clippy --all-targets --all-features -- -D warnings
 cargo fmt --all
 
 # Run tests
 cargo test
-
-# Build all components (recommended)
-golem build
 ```
 
 ## Contributing

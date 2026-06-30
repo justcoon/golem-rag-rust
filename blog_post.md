@@ -16,7 +16,7 @@ To understand how this all fits together, it's helpful to look at the overall ar
 
 At the center of this ecosystem are several key agents:
 - **SearchAgent**: Handles hybrid semantic and keyword search requests.
-- **DocumentAgent**: Document retrieval operations.
+- **DocumentAgent**: Handles document retrieval operations.
 - **S3DocumentSyncAgent**: Orchestrates the synchronization process and scheduling.
 - **S3DocumentLoaderAgent**: Interfaces with S3 to list and fetch files.
 - **EmbeddingGeneratorAgent**: Communicates with external providers to turn text into vectors.
@@ -63,7 +63,7 @@ pub trait DocumentEmbeddingGeneratorAgent {
 }
 ```
 
-Generating embeddings for a document is a multi-step process. It first retrieves the document from the database, splits it into smaller chunks based on the configurable chunk size and overlap defined in `EmbeddingConfig`, and generates vector embeddings for each chunk using the configured embedding service. The resulting embeddings are stored in the PostgreSQL `pgvector` table and linked to the original document ID.
+Generating embeddings for a document is a multi-step process. It first retrieves the document from the database, splits it into smaller chunks based on the chunk size and overlap defined in `ChunkConfig`, and generates vector embeddings for each chunk using the configured embedding service. The resulting embeddings are stored in the PostgreSQL `pgvector` table and linked to the original document ID.
 
 ### Hybrid Search: The Best of Both Worlds
 
@@ -137,6 +137,9 @@ fn fuse_results(
         let score = rrf_score(config, rank);
         // ... update or insert into map
     }
+
+    // Convert to sorted vector
+    let mut results: Vec<HybridSearchResult> = fused_results.into_values().collect();
 
     // Sort by combined score
     results.sort_by(|a, b| b.combined_score.total_cmp(&a.combined_score));
