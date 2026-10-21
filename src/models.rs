@@ -310,3 +310,27 @@ impl From<&str> for ErrorResponse {
         }
     }
 }
+
+impl From<golem_rust::agentic::ConfigValueError> for ErrorResponse {
+    fn from(err: golem_rust::agentic::ConfigValueError) -> Self {
+        ErrorResponse {
+            message: format!("Configuration error: {err:?}"),
+        }
+    }
+}
+
+impl From<golem_rust::agentic::SecretAccessError> for ErrorResponse {
+    fn from(err: golem_rust::agentic::SecretAccessError) -> Self {
+        ErrorResponse {
+            message: format!("Secret access error: {err:?}"),
+        }
+    }
+}
+
+impl From<anyhow::Error> for ErrorResponse {
+    fn from(err: anyhow::Error) -> Self {
+        ErrorResponse {
+            message: err.to_string(),
+        }
+    }
+}

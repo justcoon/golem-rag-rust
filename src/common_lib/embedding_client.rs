@@ -1,10 +1,8 @@
 use anyhow::Result;
-use golem_ai_embed::EmbeddingProvider;
-use golem_ai_embed::config::SecretSource;
-use golem_ai_embed::model::{Config, ContentPart};
-use golem_ai_embed_openai::{DurableOpenAI, OpenAiEmbedConfig};
 use golem_rust::ConfigSchema;
 use golem_rust::agentic::Secret;
+use golem_rust::http::{self, Request};
+use serde::{Deserialize, Serialize};
 
 /// Default embedding dimension for mock embeddings
 pub const DEFAULT_EMBEDDING_DIMENSION: usize = 768;
@@ -19,44 +17,76 @@ pub struct EmbeddingConfig {
 
 pub struct EmbeddingClient {
     model: String,
-    config: OpenAiEmbedConfig,
+    api_key: String,
+    api_base: String,
+}
+
+#[derive(Serialize)]
+struct EmbeddingRequest<'a> {
+    input: &'a str,
+    model: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    dimensions: Option<u32>,
+}
+
+#[derive(Deserialize)]
+struct EmbeddingResponseData {
+    embedding: Vec<f32>,
+}
+
+#[derive(Deserialize)]
+struct EmbeddingResponse {
+    data: Vec<EmbeddingResponseData>,
 }
 
 impl EmbeddingClient {
     pub fn new(config: EmbeddingConfig) -> Result<Self> {
-        let openai_config = OpenAiEmbedConfig {
-            api_key: SecretSource::from_handle(config.api_key),
-            base_url: Some(config.api_base),
-        };
-
+        let api_key = config.api_key.get().map_err(|e| anyhow::anyhow!("{e:?}"))?;
         Ok(Self {
             model: config.model,
-            config: openai_config,
+            api_key,
+            api_base: config.api_base,
         })
     }
 
     pub async fn generate_embedding(&self, text: &str) -> Result<Vec<f32>> {
-        let inputs = vec![ContentPart::Text(text.to_string())];
-        let config = Config {
-            model: Some(self.model.clone()),
-            task_type: None,
+        let url = format!("{}/embeddings", self.api_base.trim_end_matches('/'));
+        let req_body = serde_json::to_vec(&EmbeddingRequest {
+            input: text,
+            model: &self.model,
             dimensions: Some(DEFAULT_EMBEDDING_DIMENSION as u32),
-            truncation: None,
-            output_format: None,
-            output_dtype: None,
-            user: None,
-            provider_options: vec![],
-        };
-        let response = DurableOpenAI::generate(self.config.clone(), inputs, config)
-            .map_err(|e| anyhow::anyhow!("Embedding generation failed: {}", e))?;
+        })?;
 
-        if response.embeddings.is_empty() {
-            return Err(anyhow::anyhow!("No embeddings returned"));
+        let mut req_builder = Request::post(&url)
+            .header("Content-Type", "application/json")
+            .header("Accept", "application/json");
+
+        if !self.api_key.trim().is_empty() {
+            req_builder = req_builder.header("Authorization", format!("Bearer {}", self.api_key));
         }
 
-        match &response.embeddings[0].vector {
-            golem_ai_embed::model::VectorData::Float(vec) => Ok(vec.clone()),
-            _ => Err(anyhow::anyhow!("Unexpected vector type")),
+        let request = req_builder.body(req_body)?;
+        let response = http::send(request)
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to send embedding HTTP request: {e}"))?;
+
+        let status = response.status();
+        if !status.is_success() {
+            let err_text = http::response_text(response).await.unwrap_or_default();
+            return Err(anyhow::anyhow!(
+                "Embedding API returned HTTP {status}: {err_text}"
+            ));
         }
+
+        let res_data: EmbeddingResponse = http::response_json(response)
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to parse embedding response JSON: {e}"))?;
+
+        res_data
+            .data
+            .into_iter()
+            .next()
+            .map(|d| d.embedding)
+            .ok_or_else(|| anyhow::anyhow!("No embeddings returned from embedding API"))
     }
 }

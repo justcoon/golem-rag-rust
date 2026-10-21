@@ -16,14 +16,22 @@ pub struct S3Config {
     pub endpoint_url: Option<String>, // Custom S3-compatible endpoint
 }
 
-impl From<S3Config> for S3ClientConfig {
-    fn from(cfg: S3Config) -> Self {
-        Self {
-            access_key_id: cfg.access_key_id.get(),
-            secret_access_key: cfg.secret_access_key.get(),
+impl TryFrom<S3Config> for S3ClientConfig {
+    type Error = anyhow::Error;
+
+    fn try_from(cfg: S3Config) -> Result<Self, Self::Error> {
+        Ok(Self {
+            access_key_id: cfg
+                .access_key_id
+                .get()
+                .map_err(|e| anyhow::anyhow!("{e:?}"))?,
+            secret_access_key: cfg
+                .secret_access_key
+                .get()
+                .map_err(|e| anyhow::anyhow!("{e:?}"))?,
             region: cfg.region,
             endpoint_url: cfg.endpoint_url,
-        }
+        })
     }
 }
 
@@ -107,6 +115,11 @@ pub struct S3Client {
 }
 
 impl S3Client {
+    pub fn from_config(cfg: S3Config) -> Result<Self, anyhow::Error> {
+        let client_cfg = S3ClientConfig::try_from(cfg)?;
+        Self::new(client_cfg).map_err(|e| anyhow::anyhow!("{e}"))
+    }
+
     pub fn new(config: S3ClientConfig) -> S3Result<Self> {
         let client = Client::builder()
             .timeout(std::time::Duration::from_secs(30))

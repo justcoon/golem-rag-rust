@@ -183,4 +183,9 @@ This architecture naturally leads to a distributed processing philosophy. Instea
 
 Even though each agent execution is single-threaded to keep state management simple, the system scales by fanning out work to individual worker agents. We achieve massive parallelism while each piece of code remains dead simple—no locks, no mutexes, and no complex concurrency primitives. We just let Golem handle the distribution and durability.
 
+### Summary & Source Code
+
 Building RAG this way feels different. You aren't just writing functions that talk to a database; you're designing a small ecosystem of workers that are guaranteed to finish their jobs. It removes a huge layer of boilerplate related to reliability and state recovery, letting you focus on the actual logic of retrieval and generation.
+
+The complete codebase, infrastructure setup instructions (including PostgreSQL with `pgvector` and Docker Compose), and deployment configuration are available in the [golem-rag-rust GitHub repository](https://github.com/justcoon/golem-rag-rust).
+

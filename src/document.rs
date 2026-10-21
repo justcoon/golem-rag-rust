@@ -107,8 +107,7 @@ impl DocumentAgent for DocumentAgentImpl {
     }
 
     fn get_document(&self, document_id: String) -> AgentResult<Option<Document>> {
-        let db_helper = DatabaseHelper::from(self.config.get().db)
-            .map_err(|e| format!("Failed to create database helper: {:?}", e))?;
+        let db_helper = DatabaseHelper::from(self.config.get()?.db)?;
 
         db_helper
             .load_document(&document_id)
@@ -125,8 +124,7 @@ impl DocumentAgent for DocumentAgentImpl {
         filters: Option<DocumentFilters>,
         limit: Option<usize>,
     ) -> AgentResult<Vec<Document>> {
-        let db_helper = DatabaseHelper::from(self.config.get().db)
-            .map_err(|e| format!("Failed to create database helper: {:?}", e))?;
+        let db_helper = DatabaseHelper::from(self.config.get()?.db)?;
 
         // Build query with filters
         let (sql_query, params) = self.build_document_list_query(filters, limit.unwrap_or(50))?;
@@ -143,8 +141,7 @@ impl DocumentAgent for DocumentAgentImpl {
     }
 
     fn get_document_chunks(&self, document_id: String) -> AgentResult<Vec<DocumentChunk>> {
-        let db_helper = DatabaseHelper::from(self.config.get().db)
-            .map_err(|e| format!("Failed to create database helper: {:?}", e))?;
+        let db_helper = DatabaseHelper::from(self.config.get()?.db)?;
 
         let query = r#"
             SELECT id, document_id, content, chunk_index, start_pos, end_pos, token_count
@@ -164,8 +161,7 @@ impl DocumentAgent for DocumentAgentImpl {
     }
 
     fn document_exists(&self, document_id: String) -> AgentResult<bool> {
-        let db_helper = DatabaseHelper::from(self.config.get().db)
-            .map_err(|e| format!("Failed to create database helper: {:?}", e))?;
+        let db_helper = DatabaseHelper::from(self.config.get()?.db)?;
 
         db_helper.document_exists(&document_id).map_err(|e| {
             ErrorResponse::from(format!("Failed to check document existence: {:?}", e))

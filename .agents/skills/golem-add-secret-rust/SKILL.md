@@ -7,7 +7,7 @@ description: "Adding secrets to Rust Golem agents. Use when the user needs to st
 
 ## Overview
 
-Secrets are sensitive configuration values (API keys, passwords, tokens) stored per-environment and accessed at runtime via `Secret<T>` from `golem_rust::agentic::Secret`. Unlike regular config fields, secrets are **not** stored in `golem.yaml` (which is checked into source control). They are managed via the CLI or through `secretDefaults` for local development.
+Secrets are sensitive configuration values (API keys, passwords, tokens) stored per-environment and accessed at runtime via `Secret<T>` from `golem_rust::agentic::Secret`. Unlike regular config fields, the config value carries an opaque secret handle and plaintext is revealed only when agent code calls `.get()`. Secrets are **not** stored in `golem.yaml` (which is checked into source control). They are managed via the CLI or through `secretDefaults` for local development.
 
 ## Declaring Secrets in a Config Struct
 
@@ -80,7 +80,7 @@ impl MyAgent for MyAgentImpl {
 
 ## Reading Secrets at Runtime
 
-Call `.get()` on a `Secret<T>` to retrieve the value. Secrets are lazily loaded, so updated values are picked up on the next `.get()` call:
+Call `.get()` on a `Secret<T>` to explicitly reveal the value. Secrets are lazily loaded, so a fresh `.get()` call can observe updated values after the update is visible:
 
 ```rust
 fn connect(&self) -> String {
@@ -97,20 +97,29 @@ Secrets are environment-scoped — each deployment environment has its own set o
 
 ```shell
 # Create secrets in the current environment
-golem secret create apiKey --secret-type String --secret-value "sk-abc123"
-golem secret create db.password --secret-type String --secret-value "s3cret"
+golem secret create apiKey --type String --value "sk-abc123"
+golem secret create db.password --type String --value "s3cret"
+
+# Without a value option the value is prompted for (hidden input); or pipe it in
+printenv DB_PASSWORD | golem secret create db.password --type String --value-stdin
+
+# Create, or update the value if the secret already exists
+golem secret create apiKey --type String --value "sk-abc123" --update-existing
 
 # List all secrets
 golem secret list
 
 # Update a secret value
-golem secret update-value apiKey --secret-value "new-value"
+golem secret update apiKey --value "new-value"
 
-# Delete a secret
+# Remove a secret value
+golem secret update apiKey --unset
+
+# Delete a secret (asks for confirmation; --yes skips it)
 golem secret delete apiKey
 ```
 
-> **Note:** For `update-value` and `delete`, you can also use `--id <uuid>` instead of the positional path.
+> **Note:** For `update` and `delete`, you can also use `--id <uuid>` instead of the positional path.
 
 ## Secret Defaults in golem.yaml
 
@@ -129,8 +138,9 @@ secretDefaults:
 - Secrets use the same `Config<T>` constructor injection mechanism as regular typed config
 - If the agent also needs non-secret typed config guidance, use `golem-add-config-rust` alongside this skill
 - Secret paths use **camelCase** — Rust `snake_case` fields are converted automatically (e.g., `api_key` → `apiKey`)
-- The `--secret-type` argument accepts Rust type names: `String`, `i32`, `bool`, `Vec<String>`, `Option<i32>` (JSON-encoded analysed types like `'{"type":"Str"}'` are also supported as a fallback)
+- The `--type` argument accepts Rust type names: `String`, `i32`, `bool`, `Vec<String>`, `Option<i32>` (if parsing as Rust fails, the other supported languages' type syntax is tried)
 - Secrets are stored **per-environment**, not per-agent-instance
 - Missing required secrets cause agent creation/deployment to fail — use `Option<Secret<T>>` for optional secrets
-- Secrets are lazily loaded on `.get()`, allowing runtime updates without restarting the agent
+- Secrets are revealed on `.get()`, and each reveal pins the resolved secret revision for deterministic retries and replay
+- Fresh `.get()` calls can observe runtime updates without restarting the agent
 - If you also need non-secret config fields, follow the same `#[agent_config]` constructor pattern

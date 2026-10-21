@@ -77,8 +77,7 @@ impl SearchAgent for SearchAgentImpl {
     ) -> AgentResult<Vec<SearchResult>> {
         log::info!("Finding similar documents to: {}", document_id);
 
-        let db_helper = DatabaseHelper::from(self.config.get().db)
-            .map_err(|e| format!("Failed to create database helper: {:?}", e))?;
+        let db_helper = DatabaseHelper::from(self.config.get()?.db)?;
 
         let limit = limit.map(|l| l as usize).unwrap_or(10);
 
@@ -116,8 +115,7 @@ impl SearchAgent for SearchAgentImpl {
             return Ok(Vec::new());
         }
 
-        let db_helper = DatabaseHelper::from(self.config.get().db)
-            .map_err(|e| format!("Failed to create database helper: {:?}", e))?;
+        let db_helper = DatabaseHelper::from(self.config.get()?.db)?;
 
         let limit = limit.map(|l| l as usize).unwrap_or(10);
         let threshold = threshold.unwrap_or(0.7);
@@ -157,8 +155,7 @@ impl SearchAgent for SearchAgentImpl {
 
 impl SearchAgentImpl {
     async fn generate_query_embedding(&self, query: &str) -> AgentResult<Vec<f32>> {
-        let embedding_client = EmbeddingClient::new(self.config.get().embedding)
-            .map_err(|e| format!("Failed to create embedding client: {:?}", e))?;
+        let embedding_client = EmbeddingClient::new(self.config.get()?.embedding)?;
 
         match embedding_client.generate_embedding(query).await {
             Ok(embedding) => Ok(embedding),

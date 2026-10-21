@@ -34,7 +34,7 @@ components:
 ## Step 2 — Deploy
 
 ```shell
-golem deploy
+golem deploy --yes
 ```
 
 After deployment, newly created agents from this component automatically send telemetry to the configured collector.
@@ -114,6 +114,14 @@ When `metrics` is included in `signals`, the following metrics are exported:
 
 Each metric includes `service.name`, `golem.agent.id`, `golem.component.id`, and `golem.component.version` attributes.
 
+## Export Semantics
+
+- Durable `Start`, `End`, and `Cancelled` metadata drives span lifecycle. Long-lived spans retain their origin trace across invocations; failed or retrying attempts do not prematurely close the logical span. Logs use their recorded trace context.
+- Stream summaries use bounded event/outcome metric labels and aggregate item counts; they do not emit a span per item. Active resource and memory values are gauges, and metric labels avoid resource IDs and payload values.
+- In `agent-type` service-name mode, `service.name` excludes constructor parameters and phantom instance IDs; `golem.agent.id` remains the full identity.
+- Collector export is best effort. Accepted source state advances when a send fails, and traces, logs, and metrics are still attempted independently. Exactly-once plugin batch delivery is not exactly-once collector delivery.
+- Fork/revert cannot retract telemetry already accepted by a collector. Source deletion does not provide a terminal signal, so no successful close is invented. Switching plugin instances can lose open-span state; continuity is deferred to GOL-667.
+
 ## Local Observability Stack
 
 The Golem repository includes a ready-made Docker Compose setup at `docker-examples/otlp-collector/`:
@@ -163,3 +171,7 @@ components:
 - Trace context propagates automatically through HTTP routes and RPC calls
 - Use `context::start_span` from `golem_rust::bindings::golem::api::context` for custom spans
 - Plugin can be activated/deactivated per agent with `golem agent activate-plugin` / `golem agent deactivate-plugin`
+
+## Related Skills
+
+- Load `golem-manage-plugins` for the general plugin installation model (manifest sections, CLI commands, priority, per-environment configuration)
