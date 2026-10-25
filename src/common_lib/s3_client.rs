@@ -1,7 +1,7 @@
 use chrono::Utc;
 use golem_rust::agentic::Secret;
+use golem_rust::http::{self, Request};
 use golem_rust::{ConfigSchema, Schema};
-use golem_wasi_http::{Client, Method};
 use hmac::{Hmac, Mac};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -111,7 +111,6 @@ pub type S3Result<T> = Result<T, S3Error>;
 pub struct S3Client {
     config: S3ClientConfig,
     endpoint_url: String, // Fully qualified endpoint URL
-    client: Client,
 }
 
 impl S3Client {
@@ -121,11 +120,6 @@ impl S3Client {
     }
 
     pub fn new(config: S3ClientConfig) -> S3Result<Self> {
-        let client = Client::builder()
-            .timeout(std::time::Duration::from_secs(30))
-            .build()
-            .map_err(|e| S3Error::NetworkError(format!("Failed to create HTTP client: {:?}", e)))?;
-
         // Use custom endpoint or default AWS S3 endpoint
         let endpoint_url = config
             .endpoint_url
@@ -135,11 +129,10 @@ impl S3Client {
         Ok(Self {
             config,
             endpoint_url,
-            client,
         })
     }
 
-    pub fn list_buckets(&self) -> S3Result<S3ListBucketsResponse> {
+    pub async fn list_buckets(&self) -> S3Result<S3ListBucketsResponse> {
         let endpoint = self.endpoint_url.trim_end_matches('/');
         let path = "/";
 
@@ -159,25 +152,28 @@ impl S3Client {
 
         let url = format!("{}{}", endpoint, path);
 
-        let response = self
-            .client
-            .request(Method::GET, &url)
+        let request = Request::get(&url)
             .header("Authorization", authorization)
             .header("X-Amz-Date", timestamp)
             .header("X-Amz-Content-Sha256", payload_hash)
-            .send()
+            .body(Vec::new())
+            .map_err(|e| S3Error::InvalidRequest(format!("Failed to build request: {:?}", e)))?;
+
+        let response = http::send(request)
+            .await
             .map_err(|e| S3Error::NetworkError(format!("Failed to send request: {:?}", e)))?;
 
-        if response.status().is_success() {
-            let body = response
-                .text()
+        let status = response.status();
+        if status.is_success() {
+            let body = http::response_text(response)
+                .await
                 .map_err(|e| S3Error::NetworkError(format!("Failed to read response: {:?}", e)))?;
 
             self.parse_s3_list_buckets_response(&body)
         } else {
             Err(S3Error::NetworkError(format!(
                 "S3 request failed with status: {}",
-                response.status()
+                status
             )))
         }
     }
@@ -219,7 +215,7 @@ impl S3Client {
         }
     }
 
-    pub fn list_objects(
+    pub async fn list_objects(
         &self,
         bucket: &str,
         prefix: Option<&str>,
@@ -274,30 +270,33 @@ impl S3Client {
             &payload_hash,
         );
 
-        let response = self
-            .client
-            .request(Method::GET, &url)
+        let request = Request::get(&url)
             .header("Authorization", authorization)
             .header("X-Amz-Date", timestamp)
             .header("X-Amz-Content-Sha256", payload_hash)
-            .send()
+            .body(Vec::new())
+            .map_err(|e| S3Error::InvalidRequest(format!("Failed to build request: {:?}", e)))?;
+
+        let response = http::send(request)
+            .await
             .map_err(|e| S3Error::NetworkError(format!("Failed to send request: {:?}", e)))?;
 
-        if response.status().is_success() {
-            let body = response
-                .text()
+        let status = response.status();
+        if status.is_success() {
+            let body = http::response_text(response)
+                .await
                 .map_err(|e| S3Error::NetworkError(format!("Failed to read response: {:?}", e)))?;
 
             self.parse_s3_list_response(&body, bucket)
         } else {
             Err(S3Error::NetworkError(format!(
                 "S3 request failed with status: {}",
-                response.status()
+                status
             )))
         }
     }
 
-    pub fn get_object(&self, bucket: &str, key: &str) -> S3Result<Vec<u8>> {
+    pub async fn get_object(&self, bucket: &str, key: &str) -> S3Result<Vec<u8>> {
         let endpoint = self.build_endpoint_url(bucket);
         let path = format!("/{}", key);
 
@@ -317,31 +316,34 @@ impl S3Client {
 
         let url = format!("{}{}", endpoint, path);
 
-        let response = self
-            .client
-            .request(Method::GET, &url)
+        let request = Request::get(&url)
             .header("Authorization", authorization)
             .header("X-Amz-Date", timestamp)
             .header("X-Amz-Content-Sha256", payload_hash)
-            .send()
+            .body(Vec::new())
+            .map_err(|e| S3Error::InvalidRequest(format!("Failed to build request: {:?}", e)))?;
+
+        let response = http::send(request)
+            .await
             .map_err(|e| S3Error::NetworkError(format!("Failed to send request: {:?}", e)))?;
 
-        if response.status().is_success() {
-            response
-                .bytes()
-                .map_err(|e| S3Error::NetworkError(format!("Failed to read object data: {:?}", e)))
-                .map(|bytes| bytes.to_vec())
-        } else if response.status().as_u16() == 404 {
+        let status = response.status();
+        if status.is_success() {
+            let bytes = http::response_bytes(response).await.map_err(|e| {
+                S3Error::NetworkError(format!("Failed to read object data: {:?}", e))
+            })?;
+            Ok(bytes.to_vec())
+        } else if status.as_u16() == 404 {
             Err(S3Error::NotFound(format!("Object not found: {}", key)))
         } else {
             Err(S3Error::NetworkError(format!(
                 "S3 request failed with status: {}",
-                response.status()
+                status
             )))
         }
     }
 
-    pub fn get_object_metadata(&self, bucket: &str, key: &str) -> S3Result<S3ObjectMetadata> {
+    pub async fn get_object_metadata(&self, bucket: &str, key: &str) -> S3Result<S3ObjectMetadata> {
         let endpoint = self.build_endpoint_url(bucket);
         let path = format!("/{}", key);
 
@@ -361,16 +363,19 @@ impl S3Client {
 
         let url = format!("{}{}", endpoint, path);
 
-        let response = self
-            .client
-            .request(Method::HEAD, &url)
+        let request = Request::head(&url)
             .header("Authorization", authorization)
             .header("X-Amz-Date", timestamp)
             .header("X-Amz-Content-Sha256", payload_hash)
-            .send()
+            .body(Vec::new())
+            .map_err(|e| S3Error::InvalidRequest(format!("Failed to build request: {:?}", e)))?;
+
+        let response = http::send(request)
+            .await
             .map_err(|e| S3Error::NetworkError(format!("Failed to send request: {:?}", e)))?;
 
-        if response.status().is_success() {
+        let status = response.status();
+        if status.is_success() {
             let content_length = response
                 .headers()
                 .get("content-length")
@@ -399,12 +404,12 @@ impl S3Client {
                 bucket: bucket.to_string(),
                 key: key.to_string(),
             })
-        } else if response.status().as_u16() == 404 {
+        } else if status.as_u16() == 404 {
             Err(S3Error::NotFound(format!("Object not found: {}", key)))
         } else {
             Err(S3Error::NetworkError(format!(
                 "S3 request failed with status: {}",
-                response.status()
+                status
             )))
         }
     }
