@@ -31,7 +31,7 @@ pub trait SearchAgent {
     async fn find_similar_documents(
         &self,
         document_id: String,
-        limit: Option<u64>,
+        limit: Option<u32>,
     ) -> AgentResult<Vec<SearchResult>>;
 
     /// Search for documents using semantic and/or keyword search
@@ -54,7 +54,7 @@ pub trait SearchAgent {
         &self,
         query: String,
         filters: Option<SearchFilters>,
-        limit: Option<u64>,
+        limit: Option<u32>,
         threshold: Option<f32>,
         config: Option<HybridSearchConfig>,
     ) -> AgentResult<Vec<HybridSearchResult>>;
@@ -73,7 +73,7 @@ impl SearchAgent for SearchAgentImpl {
     async fn find_similar_documents(
         &self,
         document_id: String,
-        limit: Option<u64>,
+        limit: Option<u32>,
     ) -> AgentResult<Vec<SearchResult>> {
         log::info!("Finding similar documents to: {}", document_id);
 
@@ -105,7 +105,7 @@ impl SearchAgent for SearchAgentImpl {
         &self,
         query: String,
         filters: Option<SearchFilters>,
-        limit: Option<u64>,
+        limit: Option<u32>,
         threshold: Option<f32>,
         config: Option<HybridSearchConfig>,
     ) -> AgentResult<Vec<HybridSearchResult>> {
