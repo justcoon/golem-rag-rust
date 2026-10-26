@@ -123,11 +123,46 @@ jobs:
         uses: arduino/setup-protoc@v3
       - name: Compile
         run: golem-cli build
-      - name: Save components
-        uses: actions/upload-artifact@v4
-        with:
-          path: golem-temp/agents/*.wasm
-          name: components
+      - name: Start Golem server
+        run: |
+          golem server run &
+          SERVER_PID=$!
+          echo "Server PID: $SERVER_PID"
+          echo "Waiting for Golem server to start..."
+          for i in {1..30}; do
+            if curl -s http://localhost:9881/healthcheck > /dev/null; then
+              echo "Golem server is ready"
+              break
+            fi
+            echo "Attempt $i: Server not ready yet..."
+            sleep 2
+          done
+      - name: Deploy components
+        env:
+          POSTGRES_HOST: localhost
+          POSTGRES_PORT: 5432
+          POSTGRES_DB: golem_rag
+          POSTGRES_USER: golem_user
+          POSTGRES_PASSWORD: golem_password
+          AWS_ACCESS_KEY_ID: rustfsadmin
+          AWS_SECRET_ACCESS_KEY: rustfsadmin123
+          AWS_DEFAULT_REGION: us-east-1
+          S3_ENDPOINT_URL: http://localhost:9000
+          EMBEDDING_API_BASE: http://localhost:11434/v1
+          EMBEDDING_MODEL: nomic-embed-text
+          EMBEDDING_API_KEY: ollama
+          RUST_LOG: info
+        run: golem deploy --reset --yes
+      - name: Smoke test deployment
+        run: |
+          echo "Testing basic deployment..."
+          golem component list
+          echo "Deployment test completed successfully"
+      - name: Verify OpenAPI spec
+        run: |
+          echo "Fetching OpenAPI specification..."
+          curl http://localhost:9006/openapi.yaml
+          echo "OpenAPI spec verification completed"
 
   auto-merge:
     needs: build
