@@ -180,7 +180,7 @@ async fn sync_bucket(bucket: String) -> BucketSyncResult {
     let s3_loader = S3DocumentLoaderAgentClient::new_phantom();
 
     // Load documents from bucket (this handles change detection)
-    match s3_loader.load_documents(bucket.clone(), None).await {
+    match s3_loader.load_documents(bucket.clone(), None).await.value {
         Ok(document_ids) => {
             let document_ids: Vec<String> = document_ids;
             bucket_result.documents_loaded = document_ids.len();
@@ -196,6 +196,7 @@ async fn sync_bucket(bucket: String) -> BucketSyncResult {
                 match embedding_generator
                     .generate_embeddings_for_documents(document_ids)
                     .await
+                    .value
                 {
                     Ok(embedding_count) => {
                         bucket_result.embeddings_generated = embedding_count;
@@ -252,6 +253,7 @@ impl S3DocumentSyncAgent for S3DocumentSyncAgentImpl {
         let buckets: Vec<String> = s3_loader
             .list_buckets()
             .await
+            .value
             .map_err(|e| format!("Failed to list S3 buckets: {}", e.message))?;
 
         log::info!("Found {} buckets to sync", buckets.len());
@@ -319,7 +321,7 @@ impl S3DocumentSyncAgent for S3DocumentSyncAgentImpl {
 
         // Trigger the scheduled execution
         let schedule_time = get_next_execution_time(interval_minutes);
-        S3DocumentSyncAgentClient::get().schedule_execute_scheduled_sync(schedule_time);
+        let _ = S3DocumentSyncAgentClient::get().schedule_execute_scheduled_sync(schedule_time);
 
         Ok(message)
     }
@@ -341,7 +343,7 @@ impl S3DocumentSyncAgent for S3DocumentSyncAgentImpl {
         {
             log::info!("Rescheduling next sync execution");
             let schedule_time = get_next_execution_time(updated_schedule.interval_minutes);
-            S3DocumentSyncAgentClient::get().schedule_execute_scheduled_sync(schedule_time);
+            let _ = S3DocumentSyncAgentClient::get().schedule_execute_scheduled_sync(schedule_time);
             Ok(true)
         } else {
             self.state.delete_schedule();
@@ -360,19 +362,16 @@ impl S3DocumentSyncAgent for S3DocumentSyncAgentImpl {
     }
 }
 
-fn get_next_execution_time(
-    interval_minutes: u64,
-) -> golem_rust::wasip2::clocks::wall_clock::Datetime {
-    use golem_rust::wasip2::clocks::wall_clock::Datetime;
+fn get_next_execution_time(interval_minutes: u64) -> golem_rust::ScheduledTime {
     let now_secs = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
+        .unwrap_or_default()
         .as_secs();
 
     let interval_secs = interval_minutes * 60;
 
-    Datetime {
-        seconds: now_secs + interval_secs,
+    golem_rust::ScheduledTime {
+        seconds: (now_secs + interval_secs) as i64,
         nanoseconds: 0,
     }
 }

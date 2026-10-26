@@ -40,7 +40,11 @@ pub trait S3DocumentLoaderAgent {
         "Loads documents from the specified S3 bucket, optionally filtered by prefix. Handles change detection and updates existing documents if they have been modified."
     )]
     #[endpoint(post = "/buckets/{bucket}/load")]
-    fn load_documents(&self, bucket: String, prefix: Option<String>) -> AgentResult<Vec<String>>;
+    async fn load_documents(
+        &self,
+        bucket: String,
+        prefix: Option<String>,
+    ) -> AgentResult<Vec<String>>;
 
     /// List available S3 documents for a bucket with optional prefix
     #[prompt("List documents in an S3 bucket")]
@@ -48,7 +52,7 @@ pub trait S3DocumentLoaderAgent {
         "Lists all available documents in the specified S3 bucket, optionally filtered by prefix. Returns document metadata including size, last modified time, and content type."
     )]
     #[endpoint(post = "/buckets/{bucket}/list")]
-    fn list_documents(
+    async fn list_documents(
         &self,
         bucket: String,
         prefix: Option<String>,
@@ -60,38 +64,41 @@ pub trait S3DocumentLoaderAgent {
         "Returns a list of all S3 buckets that are accessible with the current configuration."
     )]
     #[endpoint(get = "/buckets")]
-    fn list_buckets(&self) -> AgentResult<Vec<String>>;
+    async fn list_buckets(&self) -> AgentResult<Vec<String>>;
 }
 
 struct S3DocumentLoaderAgentImpl {
-    s3_client: S3Client,
     config: Config<S3DocumentLoaderAgentConfig>,
 }
 
 #[agent_implementation]
 impl S3DocumentLoaderAgent for S3DocumentLoaderAgentImpl {
     fn new(#[agent_config] config: Config<S3DocumentLoaderAgentConfig>) -> Self {
-        let s3_client = S3Client::new(config.get().s3.into()).expect("Failed to create S3 client");
-
-        Self { s3_client, config }
+        Self { config }
     }
 
-    fn load_documents(&self, bucket: String, prefix: Option<String>) -> AgentResult<Vec<String>> {
+    async fn load_documents(
+        &self,
+        bucket: String,
+        prefix: Option<String>,
+    ) -> AgentResult<Vec<String>> {
         log::info!(
             "Loading documents from bucket: {}, prefix: {:?}",
             bucket,
             prefix
         );
 
+        let s3_client = self.s3_client()?;
+
         // Step 1: List documents in S3 using prefix directly
         let s3_documents = self
             .list_s3_documents(&bucket, prefix.as_deref())
+            .await
             .map_err(|e| format!("Failed to list S3 documents: {}", e.message))?;
 
         // Step 2: Process each document
         let mut loaded_document_ids = Vec::new();
-        let db_helper = DatabaseHelper::from(self.config.get().db)
-            .map_err(|e| format!("Failed to create database helper: {:?}", e))?;
+        let db_helper = DatabaseHelper::from(self.config.get()?.db)?;
 
         for s3_doc in &s3_documents {
             // Check if document already exists and if it needs update
@@ -169,7 +176,7 @@ impl S3DocumentLoaderAgent for S3DocumentLoaderAgentImpl {
             }
 
             // Download document content
-            let content = match self.s3_client.get_object(&bucket, &s3_doc.key) {
+            let content = match s3_client.get_object(&bucket, &s3_doc.key).await {
                 Ok(content) => content,
                 Err(e) => {
                     log::error!(
@@ -248,18 +255,19 @@ impl S3DocumentLoaderAgent for S3DocumentLoaderAgentImpl {
         Ok(loaded_document_ids)
     }
 
-    fn list_documents(
+    async fn list_documents(
         &self,
         bucket: String,
         prefix: Option<String>,
     ) -> AgentResult<Vec<S3DocumentSource>> {
-        self.list_s3_documents(&bucket, prefix.as_deref())
+        self.list_s3_documents(&bucket, prefix.as_deref()).await
     }
 
-    fn list_buckets(&self) -> AgentResult<Vec<String>> {
+    async fn list_buckets(&self) -> AgentResult<Vec<String>> {
         let buckets_response = self
-            .s3_client
+            .s3_client()?
             .list_buckets()
+            .await
             .map_err(|e| format!("Failed to list S3 buckets: {:?}", e))?;
 
         let bucket_names: Vec<String> = buckets_response
@@ -273,14 +281,20 @@ impl S3DocumentLoaderAgent for S3DocumentLoaderAgentImpl {
 }
 
 impl S3DocumentLoaderAgentImpl {
-    fn list_s3_documents(
+    fn s3_client(&self) -> AgentResult<S3Client> {
+        let config = self.config.get()?;
+        S3Client::from_config(config.s3).map_err(Into::into)
+    }
+
+    async fn list_s3_documents(
         &self,
         bucket: &str,
         prefix: Option<&str>,
     ) -> AgentResult<Vec<S3DocumentSource>> {
         let list_response = self
-            .s3_client
+            .s3_client()?
             .list_objects(bucket, prefix, true) // Use recursive listing to get all files in subfolders
+            .await
             .map_err(|e| format!("Failed to list S3 objects: {:?}", e))?;
 
         // Filter out directories and empty objects, bucket is already set by S3 client

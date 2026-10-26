@@ -1,6 +1,6 @@
 # Golem RAG System (Rust Implementation)
 
-A comprehensive Retrieval-Augmented Generation (RAG) system built on Golem Cloud v1.5.4, featuring hybrid search capabilities, document management, and embedding generation.
+A comprehensive Retrieval-Augmented Generation (RAG) system built on Golem Cloud v1.6.1, featuring hybrid search capabilities, document management, and embedding generation.
 
 ## Features
 
@@ -83,7 +83,7 @@ The system consists of 6 core agents running on Golem Cloud, coordinated through
 
 - Rust with `wasm32-wasip2` target: `rustup target add wasm32-wasip2`
 - `cargo-component` version 0.21.1: `cargo install --force cargo-component@0.21.1`
-- Golem CLI (`golem`) v1.5.4: download from https://github.com/golemcloud/golem/releases
+- Golem CLI (`golem`) >= v1.6.1: download from https://github.com/golemcloud/golem/releases
 - Docker and Docker Compose
 - S3 buckets (optional, for document loading)
 

@@ -183,8 +183,7 @@ impl EmbeddingGeneratorAgent for EmbeddingGeneratorAgentImpl {
 
     async fn get_documents_without_embeddings(&self) -> AgentResult<Vec<String>> {
         log::info!("Finding all documents without embeddings");
-        let db_helper = DatabaseHelper::from(self.config.get().db)
-            .map_err(|e| format!("Failed to create database helper: {:?}", e))?;
+        let db_helper = DatabaseHelper::from(self.config.get()?.db)?;
 
         // Query for documents that don't have embeddings or have failed embeddings
         let query = r#"
@@ -429,7 +428,7 @@ impl DocumentEmbeddingGeneratorAgentImpl {
             id: uuid::Uuid::new_v4().to_string(),
             chunk_id: self.document_id.clone(), // Use document_id instead of chunk_id for now
             vector: Vector(embedding_vector),
-            model_name: self.get_model_name(),
+            model_name: self.get_model_name()?,
             created_at: Utc::now().to_rfc3339(), // Use actual current time
         };
 
@@ -451,13 +450,12 @@ impl DocumentEmbeddingGeneratorAgentImpl {
         Ok(chunk.id.clone())
     }
 
-    fn get_model_name(&self) -> String {
-        self.config.get().embedding.model.clone()
+    fn get_model_name(&self) -> AgentResult<String> {
+        Ok(self.config.get()?.embedding.model.clone())
     }
 
     fn create_db_helper(&self) -> AgentResult<DatabaseHelper> {
-        DatabaseHelper::from(self.config.get().db)
-            .map_err(|e| ErrorResponse::from(format!("Failed to create database helper: {:?}", e)))
+        DatabaseHelper::from(self.config.get()?.db).map_err(Into::into)
     }
 
     fn load_document(&self, db_helper: &DatabaseHelper) -> AgentResult<Document> {
@@ -485,8 +483,7 @@ impl DocumentEmbeddingGeneratorAgentImpl {
             // Generate embeddings for each chunk
             let mut embedding_count = 0;
 
-            let embedding_client = EmbeddingClient::new(self.config.get().embedding)
-                .map_err(|e| format!("Failed to create embedding client: {:?}", e))?;
+            let embedding_client = EmbeddingClient::new(self.config.get()?.embedding)?;
 
             let mut error: Option<ErrorResponse> = None;
 
@@ -517,7 +514,7 @@ impl DocumentEmbeddingGeneratorAgentImpl {
                 None => {
                     // Mark as completed
                     self.mark_status(
-                        &db_helper,
+                        db_helper,
                         &EmbeddingStatus::Completed {
                             chunk_count: embedding_count as usize,
                         },
@@ -533,7 +530,7 @@ impl DocumentEmbeddingGeneratorAgentImpl {
                         );
                     }
                     if let Err(status_err) = self.mark_status(
-                        &db_helper,
+                        db_helper,
                         &EmbeddingStatus::Failed {
                             error: e.message.clone(),
                         },

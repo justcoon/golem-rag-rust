@@ -614,13 +614,13 @@ pub struct PostgresDbConfig {
 }
 
 impl PostgresDbConfig {
-    fn db_url(&self) -> String {
-        let u = self.user.get();
-        let p = self.password.get();
-        format!(
+    fn db_url(&self) -> Result<String> {
+        let u = self.user.get().map_err(|e| anyhow::anyhow!("{e:?}"))?;
+        let p = self.password.get().map_err(|e| anyhow::anyhow!("{e:?}"))?;
+        Ok(format!(
             "postgresql://{}:{}@{}:{}/{}",
             u, p, self.host, self.port, self.db
-        )
+        ))
     }
 }
 
@@ -630,7 +630,7 @@ pub struct DatabaseHelper {
 
 impl DatabaseHelper {
     pub fn from(cfg: PostgresDbConfig) -> Result<Self> {
-        Self::new(&cfg.db_url())
+        Self::new(&cfg.db_url()?)
     }
 
     pub fn new(url: &str) -> Result<Self> {
